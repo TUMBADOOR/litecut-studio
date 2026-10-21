@@ -50,10 +50,16 @@ bash construir-mac.sh x64      # Mac con procesador Intel
 ```
 Se generan `dist/LiteCut-Studio-1.0.0-mac-<arquitectura>.dmg` y `.zip`.
 
-**B) Sin Mac, con GitHub** (gratis): sube esta carpeta a un repositorio de GitHub, ve a la pestaña
-**Actions › Compilar instaladores › Run workflow**. En unos minutos podrás descargar los instaladores de
-Windows, Mac Apple Silicon y Mac Intel. Si subes una etiqueta (`git tag v1.0.0 && git push --tags`) se crea una
-versión publicada con los tres archivos.
+**B) Sin Mac, con GitHub** (gratis): este proyecto ya incluye el flujo `.github/workflows/build.yml`.
+Al subir una etiqueta de versión, GitHub compila Windows, Mac Apple Silicon y Mac Intel y publica
+una página de descarga en **Releases** con los instaladores:
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+(La versión del archivo `package.json` es la que aparece en el nombre de los instaladores.)
+También puedes lanzarlo a mano en **Actions › Compilar instaladores › Run workflow**; en ese caso los
+instaladores quedan como archivos ZIP al final de la página de esa ejecución.
 
 **Primera apertura en Mac:** como la app no está notarizada por Apple, haz clic derecho sobre LiteCut Studio ›
 **Abrir** › **Abrir**. Si dice "está dañada", ejecuta en Terminal: `xattr -cr "/Applications/LiteCut Studio.app"`.

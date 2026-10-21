@@ -1,14 +1,14 @@
 # Compila los instaladores de Windows y macOS en GitHub Actions.
-# Se ejecuta al subir cambios a la rama main, a mano (Actions › "Compilar instaladores" › Run workflow)
-# o al subir una etiqueta de versión (git tag v1.0.0 && git push --tags), que además publica una versión.
+# - Al subir una etiqueta de versión (git tag v1.0.1 && git push origin v1.0.1) compila y publica
+#   una versión (Release) con los instaladores listos para descargar.
+# - También se puede lanzar a mano: Actions › "Compilar instaladores" › Run workflow
+#   (en ese caso los instaladores quedan como artefactos de la ejecución).
 name: Compilar instaladores
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
     tags: ['v*']
-    paths-ignore: ['**.md']
 
 permissions:
   contents: write
@@ -65,10 +65,15 @@ jobs:
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          name: LiteCut Studio ${{ github.ref_name }}
+          body_path: .github/release-notes.md
           files: artifacts/*
+          fail_on_unmatched_files: true
+          make_latest: true
