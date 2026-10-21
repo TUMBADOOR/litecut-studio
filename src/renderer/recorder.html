@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:" />
+    <title>Grabando — LiteCut Studio</title>
+    <link rel="stylesheet" href="css/recorder.css" />
+  </head>
+  <body>
+    <div id="bar">
+      <div class="grip" title="Arrastra para mover"></div>
+      <div class="status"><span class="dot"></span><span id="time">00:00</span></div>
+      <div id="meter" title="Nivel de audio"><i></i></div>
+      <video id="cam" muted autoplay playsinline></video>
+      <div class="btns">
+        <button id="pause" type="button" title="Pausar (Ctrl+Alt+P)"></button>
+        <button id="stop" type="button" class="stop" title="Detener y guardar (Ctrl+Alt+S)"></button>
+        <button id="discard" type="button" title="Descartar grabación"></button>
+      </div>
+      <div id="msg"></div>
+    </div>
+    <script type="module" src="js/recorder-bar.js"></script>
+  </body>
+</html>

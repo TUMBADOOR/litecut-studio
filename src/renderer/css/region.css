@@ -1,0 +1,81 @@
+/* Selección de área y marco de grabación */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 14px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+}
+body.select {
+  background: rgba(0, 0, 0, 0.38);
+  cursor: crosshair;
+}
+body.select.has-sel {
+  background: transparent;
+}
+#help {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 25, 0.92);
+  color: #ececf1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #34343e;
+  pointer-events: none;
+  z-index: 3;
+  white-space: nowrap;
+}
+body.frame #help,
+body.frame #sel,
+body.frame #actions {
+  display: none !important;
+}
+#sel {
+  position: fixed;
+  border: 2px solid #19d3c5;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+  z-index: 1;
+}
+#sel[hidden] {
+  display: none;
+}
+#size {
+  position: absolute;
+  left: 0;
+  top: -26px;
+  background: #19d3c5;
+  color: #032321;
+  font: 700 12px ui-monospace, Consolas, monospace;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+#actions {
+  position: fixed;
+  display: flex;
+  gap: 8px;
+  z-index: 4;
+  cursor: default;
+}
+#actions[hidden] {
+  display: none;
+}
+#actions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font: 600 13px system-ui, sans-serif;
+  cursor: pointer;
+  background: #2a2a33;
+  color: #fff;
+}
+#actions #ok {
+  background: #ff3b4e;
+}
+body.frame {
+  border: 3px dashed #ff3b4e;
+  border-radius: 4px;
+}

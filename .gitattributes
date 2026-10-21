@@ -1,0 +1,8 @@
+# Fines de línea: LF en el repositorio (scripts de Mac/Linux), CRLF solo para .bat de Windows.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.woff2 binary

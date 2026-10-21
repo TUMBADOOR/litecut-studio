@@ -1,0 +1,74 @@
+# Compila los instaladores de Windows y macOS en GitHub Actions.
+# Se ejecuta al subir cambios a la rama main, a mano (Actions › "Compilar instaladores" › Run workflow)
+# o al subir una etiqueta de versión (git tag v1.0.0 && git push --tags), que además publica una versión.
+name: Compilar instaladores
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiteCut-Studio-Windows
+          path: |
+            dist/*.exe
+          if-no-files-found: error
+
+  mac:
+    name: macOS (${{ matrix.arch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    env:
+      # Descarga Electron y FFmpeg de la arquitectura de destino (Apple Silicon o Intel).
+      npm_config_arch: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:mac -- --${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiteCut-Studio-macOS-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publicar versión
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*

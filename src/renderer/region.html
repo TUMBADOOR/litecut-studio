@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'" />
+    <title>Seleccionar área</title>
+    <link rel="stylesheet" href="css/region.css" />
+  </head>
+  <body>
+    <div id="help">Arrastra para elegir el área que quieres grabar · <b>Intro</b> confirmar · <b>Esc</b> cancelar</div>
+    <div id="sel" hidden><span id="size"></span></div>
+    <div id="actions" hidden>
+      <button id="ok" type="button">Grabar esta área</button>
+      <button id="cancel" type="button">Cancelar</button>
+    </div>
+    <script type="module" src="js/region.js"></script>
+  </body>
+</html>

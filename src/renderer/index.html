@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: media: data: blob:; media-src 'self' media: blob: data: mediastream:; font-src 'self' app: data:; connect-src 'self' app: media: blob: data:"
+    />
+    <title>LiteCut Studio</title>
+    <link rel="stylesheet" href="css/fonts.css" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <header id="topbar"></header>
+    <main id="workspace">
+      <nav id="sidetabs"></nav>
+      <section id="panel"></section>
+      <section id="viewer"></section>
+      <aside id="inspector"></aside>
+    </main>
+    <div id="hsplit" title="Arrastra para cambiar el tamaño de la línea de tiempo"></div>
+    <section id="timeline"></section>
+    <div class="drop-hint">Suelta los archivos para importarlos</div>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

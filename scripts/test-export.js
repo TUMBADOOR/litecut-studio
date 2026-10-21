@@ -1,0 +1,202 @@
+// Prueba del motor de exportación: genera medios sintéticos con FFmpeg, arma proyectos
+// con transiciones, textos, máscaras, filtros y audio, y verifica que FFmpeg los exporte.
+// Uso: node scripts/test-export.js [carpeta-de-trabajo] [--quick]
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { runFfmpeg, probe, ffmpegVersion, filterScriptArgs, encoderArgs, lastLines } from '../src/main/ffmpeg.js';
+import { buildExportGraph } from '../src/shared/export-graph.js';
+import { createProject, createClip, createTrack } from '../src/shared/model.js';
+import { TRANSITIONS, FILTER_PRESETS } from '../src/shared/effects.js';
+
+const args = process.argv.slice(2);
+const quick = args.includes('--quick');
+const dir = args.find((a) => !a.startsWith('--')) || path.join(os.tmpdir(), 'litecut-test');
+fs.mkdirSync(dir, { recursive: true });
+
+const version = await ffmpegVersion();
+console.log('FFmpeg:', version.text);
+
+async function gen(name, a) {
+  const out = path.join(dir, name);
+  if (!fs.existsSync(out)) {
+    const r = await runFfmpeg(['-hide_banner', '-y', ...a, out]);
+    if (r.code) throw new Error(`No se pudo generar ${name}\n${lastLines(r.stderr)}`);
+  }
+  return out;
+}
+
+const files = {
+  v1: await gen('v1.mp4', ['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=6', '-f', 'lavfi', '-i', 'sine=f=440:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest']),
+  v2: await gen('v2.mp4', ['-f', 'lavfi', '-i', 'smptebars=s=640x480:r=25:d=5', '-f', 'lavfi', '-i', 'sine=f=660:d=5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest']),
+  img: await gen('img.png', ['-f', 'lavfi', '-i', 'testsrc=s=800x800:d=1', '-frames:v', '1']),
+  music: await gen('music.mp3', ['-f', 'lavfi', '-i', 'sine=f=220:d=8', '-c:a', 'libmp3lame']),
+  text: await gen('text.png', ['-f', 'lavfi', '-i', 'color=c=white@0.85:s=420x110,format=rgba', '-frames:v', '1']),
+};
+
+async function mediaEntry(id, file, kind) {
+  const info = await probe(file);
+  return { id, path: file, name: path.basename(file), kind, duration: kind === 'image' ? 0 : info.duration, width: info.width, height: info.height, hasAudio: info.hasAudio, hasVideo: info.hasVideo, start: info.start || 0, container: info.container };
+}
+
+// Cuenta los fotogramas de video reales (la duración del contenedor puede venir solo del audio).
+async function countFrames(file) {
+  let out = '';
+  await runFfmpeg(['-hide_banner', '-nostdin', '-i', file, '-map', '0:v:0', '-f', 'null', '-'], { onLine: (l) => (out = /frame=\s*(\d+)/.test(l) ? l : out) });
+  const m = /frame=\s*(\d+)/.exec(out);
+  return m ? +m[1] : 0;
+}
+
+const media = [
+  await mediaEntry('m1', files.v1, 'video'),
+  await mediaEntry('m2', files.v2, 'video'),
+  await mediaEntry('mi', files.img, 'image'),
+  await mediaEntry('ma', files.music, 'audio'),
+];
+
+function baseProject() {
+  const p = createProject('16:9');
+  p.settings.width = 1280;
+  p.settings.height = 720;
+  p.settings.fps = 30;
+  p.media = media;
+  return p;
+}
+
+async function exportProject(p, name, { width = 640, height = 360, format = 'mp4', fps = 30, assets = {}, movie = false } = {}) {
+  const gif = format === 'gif';
+  const audioOnly = format === 'mp3' || format === 'wav';
+  const graph = buildExportGraph(p, { width, height, fps, gif, includeVideo: !audioOnly, includeAudio: !gif, movieSources: movie }, assets);
+  const enc = encoderArgs({ format, quality: 'low', width, height, fps, hw: null });
+  const out = path.join(dir, `${name}.${enc.ext}`);
+  const script = path.join(dir, `${name}.filter.txt`);
+  fs.writeFileSync(script, graph.filter);
+  const a = ['-hide_banner', '-y', '-nostdin', ...graph.inputs.flat(), ...filterScriptArgs(version, script)];
+  if (graph.vout) a.push('-map', graph.vout, ...enc.video, '-r', String(fps));
+  if (graph.aout) a.push('-map', graph.aout, ...enc.audio);
+  a.push(...enc.extra, '-t', graph.total.toFixed(3), out);
+  const t0 = Date.now();
+  const r = await runFfmpeg(a);
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  if (r.code !== 0) {
+    console.log(`  ✗ ${name} (${secs}s)\n${lastLines(r.stderr, 20)}`);
+    return false;
+  }
+  const info = await probe(out);
+  const okDur = Math.abs(info.duration - graph.total) < 0.25 || (gif && info.duration > 0);
+  let okFrames = true;
+  let framesTxt = '';
+  if (!audioOnly && !gif) {
+    const n = await countFrames(out);
+    okFrames = Math.abs(n - graph.frames) <= 1;
+    framesTxt = ` ${n}/${graph.frames} fotogramas`;
+  }
+  const ok = okDur && okFrames;
+  console.log(`  ${ok ? '✓' : '✗'} ${name}: ${info.duration.toFixed(2)}s (esperado ${graph.total.toFixed(2)}s)${framesTxt} ${info.width}x${info.height} en ${secs}s`);
+  return ok;
+}
+
+let failures = 0;
+const check = (ok) => {
+  if (!ok) failures++;
+};
+
+// ---------- Proyecto completo ----------
+{
+  const p = baseProject();
+  const [V1, A1] = p.tracks;
+  const V2 = createTrack('video');
+  p.tracks.unshift(V2);
+  const c1 = createClip('video', { trackId: V1.id, mediaId: 'm1', start: 0, duration: 4, in: 1 });
+  const c2 = createClip('video', { trackId: V1.id, mediaId: 'm2', start: 3.5, duration: 3, transitionIn: { type: 'fade', duration: 0.5 } });
+  c2.adjust.saturation = 50;
+  c2.adjust.vignette = 40;
+  const c3 = createClip('image', { trackId: V1.id, mediaId: 'mi', start: 6, duration: 3, kenburns: 'zoom-in', transitionIn: { type: 'slide-left', duration: 0.5 } });
+  const c4 = createClip('video', { trackId: V1.id, mediaId: 'm1', start: 10, duration: 2, speed: 2, fadeIn: 0.3 });
+  Object.assign(c4.adjust, FILTER_PRESETS.find((f) => f.id === 'vintage').adjust);
+  const t1 = createClip('text', { trackId: V2.id, start: 1, duration: 3, animIn: { type: 'fade', duration: 0.5 }, animOut: { type: 'slide-right', duration: 0.5 } });
+  t1.transform.y = 200;
+  const pip = createClip('image', { trackId: V2.id, mediaId: 'mi', start: 5, duration: 3, mask: 'circle', animIn: { type: 'zoom-in', duration: 0.6 } });
+  Object.assign(pip.transform, { scale: 0.4, x: 300, y: -150, rotation: 15, opacity: 0.9 });
+  pip.adjust.vignette = 50;
+  const pip2 = createClip('video', { trackId: V2.id, mediaId: 'm2', start: 9, duration: 2.5, mask: 'rounded', crop: { l: 0.1, t: 0.1, r: 0.1, b: 0.1 } });
+  Object.assign(pip2.transform, { scale: 0.35, x: -350, y: 180, flipH: true });
+  pip2.animOut = { type: 'zoom-out', duration: 0.5 };
+  const music = createClip('audio', { trackId: A1.id, mediaId: 'ma', start: 0, duration: 8, fadeIn: 1, fadeOut: 2, volume: 0.5 });
+  p.clips = [c1, c2, c3, c4, t1, pip, pip2, music];
+  const assets = { text: { [t1.id]: { path: files.text, w: 210, h: 56 } } };
+  console.log('Proyecto completo:');
+  check(await exportProject(p, 'completo', { assets }));
+  check(await exportProject(p, 'completo-movie', { assets, movie: true }));
+  if (!quick) {
+    check(await exportProject(p, 'completo-webm', { assets, format: 'webm', width: 480, height: 270 }));
+    check(await exportProject(p, 'completo-gif', { assets, format: 'gif', width: 320, height: 180, fps: 12 }));
+    check(await exportProject(p, 'completo-audio', { assets, format: 'mp3' }));
+  }
+}
+
+// ---------- Cada transición ----------
+if (!quick) {
+  console.log('Transiciones:');
+  for (const tr of TRANSITIONS) {
+    const p = baseProject();
+    const V1 = p.tracks[0];
+    const a = createClip('video', { trackId: V1.id, mediaId: 'm1', start: 0, duration: 2 });
+    const b = createClip('video', { trackId: V1.id, mediaId: 'm2', start: 1.4, duration: 2, transitionIn: { type: tr.id, duration: 0.6 } });
+    p.clips = [a, b];
+    check(await exportProject(p, `tr-${tr.id}`, { width: 320, height: 180 }));
+  }
+}
+
+// ---------- Rutas con caracteres especiales y MPEG-TS con inicio desplazado ----------
+{
+  console.log('Rutas especiales:');
+  const weird = path.join(dir, "carpeta rara [1], it's á;b");
+  fs.mkdirSync(weird, { recursive: true });
+  const wv = path.join(weird, 'vídeo, (1).mp4');
+  const wi = path.join(weird, "imagen 'x'.png");
+  if (!fs.existsSync(wv)) fs.copyFileSync(files.v1, wv);
+  if (!fs.existsSync(wi)) fs.copyFileSync(files.img, wi);
+  const ts = await gen('v3.ts', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=25:d=6', '-f', 'lavfi', '-i', 'sine=f=300:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-f', 'mpegts']);
+  const p = baseProject();
+  p.media = [...media, await mediaEntry('mw', wv, 'video'), await mediaEntry('mwi', wi, 'image'), await mediaEntry('mts', ts, 'video')];
+  console.log(`  (inicio del .ts: ${p.media.find((m) => m.id === 'mts').start.toFixed(3)} s)`);
+  const V1 = p.tracks[0];
+  const V2 = createTrack('video');
+  p.tracks.unshift(V2);
+  p.clips = [
+    createClip('video', { trackId: V1.id, mediaId: 'mw', start: 0, duration: 2, in: 1 }),
+    createClip('video', { trackId: V1.id, mediaId: 'mts', start: 2, duration: 2, in: 1.5 }),
+    createClip('image', { trackId: V2.id, mediaId: 'mwi', start: 0.5, duration: 2 }),
+  ];
+  p.clips[2].transform.scale = 0.3;
+  check(await exportProject(p, 'rutas-input', { width: 320, height: 180 }));
+  check(await exportProject(p, 'rutas-movie', { width: 320, height: 180, movie: true }));
+}
+
+// ---------- Casos límite ----------
+{
+  console.log('Casos límite:');
+  const p = baseProject();
+  check(await exportProject(p, 'vacio-con-audio', { width: 320, height: 180 }));
+  const p2 = baseProject();
+  const A1 = p2.tracks[1];
+  p2.clips = [createClip('audio', { trackId: A1.id, mediaId: 'ma', start: 2, duration: 3 })];
+  check(await exportProject(p2, 'solo-audio', { width: 320, height: 180 }));
+  const p3 = baseProject();
+  p3.settings.width = 1080;
+  p3.settings.height = 1920;
+  const V1 = p3.tracks[0];
+  p3.clips = [createClip('video', { trackId: V1.id, mediaId: 'm1', start: 0, duration: 3 }), createClip('image', { trackId: V1.id, mediaId: 'mi', start: 3, duration: 1 })];
+  check(await exportProject(p3, 'vertical', { width: 360, height: 640 }));
+  // Fondo desenfocado (video, imagen fija e imagen con Ken Burns) y con transición.
+  p3.clips = [
+    createClip('video', { trackId: V1.id, mediaId: 'm1', start: 0, duration: 3, bgFill: 'blur' }),
+    createClip('image', { trackId: V1.id, mediaId: 'mi', start: 2.5, duration: 2, bgFill: 'blur', transitionIn: { type: 'fade', duration: 0.5 } }),
+    createClip('image', { trackId: V1.id, mediaId: 'mi', start: 4.5, duration: 1.5, bgFill: 'blur', kenburns: 'zoom-in' }),
+  ];
+  check(await exportProject(p3, 'vertical-desenfoque', { width: 360, height: 640 }));
+}
+
+console.log(failures ? `\n${failures} prueba(s) fallaron` : '\nTodas las pruebas pasaron');
+process.exit(failures ? 1 : 0);
