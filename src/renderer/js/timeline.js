@@ -272,6 +272,7 @@ export class Timeline {
     if ((c.animIn?.type || 'none') !== 'none' || (c.animOut?.type || 'none') !== 'none' || (c.kenburns || 'none') !== 'none') badges.push(icon('wand', 11));
     if (m?.missing) badges.push(`<i class="bdg err">Sin archivo</i>`);
     else if (st?.state === 'proxy') badges.push(`<i class="bdg">Preparando ${Math.round((st.progress || 0) * 100)}%</i>`);
+    else if (st?.optimizing) badges.push(`<i class="bdg">Optimizando ${Math.round((st.progress || 0) * 100)}%</i>`);
     const typeIcon = { video: 'film', image: 'image', audio: 'music', text: 'text' }[c.type];
     const sig = `${name}|${badges.join('')}|${typeIcon}`;
     if (el._sig !== sig) {
@@ -377,7 +378,7 @@ export class Timeline {
     if (!m) return;
     const nThumbs = media.thumbs.get(m.id)?.length || 0;
     const hasPeaks = !!media.getPeaks(m.id);
-    const imgOk = c.type === 'image' ? !!media.getImage(m.id) : true;
+    const imgOk = c.type === 'image' ? !!media.getDrawable(m.id) : true;
     const sig = [visL, visR, hgt, this.pps, c.in, c.speed, c.duration, nThumbs, hasPeaks, imgOk, c.volume, c.muted, c.fadeIn, c.fadeOut].join('|');
     if (el._paintSig === sig) return;
     el._paintSig = sig;
@@ -399,7 +400,7 @@ export class Timeline {
       for (let i = first; i * tw < visR; i++) {
         const x = i * tw - visL;
         let img = null;
-        if (c.type === 'image') img = media.getImage(m.id);
+        if (c.type === 'image') img = media.getDrawable(m.id);
         else img = media.thumbAt(m.id, c.in + ((i * tw + tw / 2) / this.pps) * c.speed);
         if (img) {
           ctx.save();

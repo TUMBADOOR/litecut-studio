@@ -2,6 +2,7 @@
 import { store } from './store.js';
 import { uid, mediaKindFromPath, baseName } from '../shared/model.js';
 import { toast } from './ui.js';
+import { heavyReason } from './device.js';
 
 const api = window.api;
 export const mediaUrl = (p) => api.mediaUrl(p);
@@ -15,9 +16,17 @@ class MediaManager extends EventTarget {
     this.thumbs = new Map();
     this.peaks = new Map();
     this.images = new Map();
+    this.bitmaps = new Map();
     this.status = new Map();
-    this.prefs = { proxy4k: true };
-    api.media.onProxyProgress(({ id, progress }) => this.setStatus(id, { state: 'proxy', progress }));
+    this.optimizing = new Set();
+    this.prefs = { autoOptimize: localStorage.getItem('litecut.autoOptimize') !== '0' };
+    api.media.onProxyProgress(({ id, progress }) => this.setStatus(id, this.optimizing.has(id) ? { progress } : { state: 'proxy', progress }));
+  }
+
+  setAutoOptimize(on) {
+    this.prefs.autoOptimize = !!on;
+    localStorage.setItem('litecut.autoOptimize', on ? '1' : '0');
+    if (on) for (const m of store.project.media) if (m.kind === 'video' && !m.proxyPath && this.getStatus(m.id).state === 'ready') this.maybeOptimize(m);
   }
 
   emitChange(id) {
@@ -99,9 +108,30 @@ class MediaManager extends EventTarget {
   }
 
   needsProxyByCodec(m) {
-    if (m.hasAudio && m.acodec && !PLAYABLE_AUDIO.has(m.acodec)) return true;
-    if (m.kind === 'video' && this.prefs.proxy4k && Math.max(m.width, m.height) > 2600) return true;
-    return false;
+    return !!(m.hasAudio && m.acodec && !PLAYABLE_AUDIO.has(m.acodec));
+  }
+
+  // Videos que este equipo no reproduce con soltura (p. ej. AV1 sin decodificación por hardware o 4K en un
+  // equipo modesto): mientras se sigue editando con el original, se crea en segundo plano una copia ligera
+  // (720p H.264) solo para la vista previa. La exportación siempre usa el archivo original.
+  async maybeOptimize(m) {
+    if (!this.prefs.autoOptimize || m.proxyPath || this.optimizing.has(m.id)) return;
+    const reason = await heavyReason(m).catch(() => null);
+    if (!reason || this.optimizing.has(m.id)) return;
+    this.optimizing.add(m.id);
+    this.setStatus(m.id, { optimizing: true, progress: 0 });
+    if (!this.optimizeHinted) {
+      this.optimizeHinted = true;
+      toast(`«${m.name}» (${reason}) es pesado para este equipo: se está creando una copia ligera para editar con fluidez. Al exportar se usa el original.`, { timeout: 9000 });
+    }
+    try {
+      const r = await api.media.proxy({ id: m.id, file: m.path, kind: 'video', duration: m.duration, hasAudio: m.hasAudio });
+      const cur = store.getMedia(m.id);
+      if (r.ok && cur && cur.path === m.path && !cur.proxyPath) store.updateMedia(m.id, { proxyPath: r.path });
+    } finally {
+      this.optimizing.delete(m.id);
+      this.setStatus(m.id, { optimizing: false });
+    }
   }
 
   async prepare(m) {
@@ -128,6 +158,7 @@ class MediaManager extends EventTarget {
       if (m.kind === 'image') this.loadImage(m);
       if (m.kind === 'video') this.loadThumbs(m);
       if (m.hasAudio) this.loadPeaks(m);
+      if (m.kind === 'video') this.maybeOptimize(store.getMedia(m.id) || m);
     } catch (err) {
       this.setStatus(m.id, { state: 'error', error: err.message });
       toast(`«${m.name}»: ${err.message}`, { type: 'error', timeout: 7000 });
@@ -170,9 +201,14 @@ class MediaManager extends EventTarget {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.dataset.src = src;
-    img.onload = () => this.emitChange(m.id);
+    img.onload = () => {
+      this.emitChange(m.id);
+      this.makeBitmap(m.id, src);
+    };
     img.src = src;
     this.images.set(m.id, img);
+    this.bitmaps.get(m.id)?.bitmap?.close();
+    this.bitmaps.delete(m.id);
     return img;
   }
 
@@ -184,10 +220,43 @@ class MediaManager extends EventTarget {
     return null;
   }
 
+  // Imagen ya decodificada (fuera del hilo de la interfaz) para dibujarla en los lienzos sin tirones:
+  // dibujar por primera vez una foto grande sin decodificar congela la app más de un segundo en equipos modestos.
+  getDrawable(mediaId) {
+    const b = this.bitmaps.get(mediaId);
+    if (b) return b.bitmap || (b.failed ? this.getImage(mediaId) : null);
+    const img = this.getImage(mediaId);
+    if (img) this.makeBitmap(mediaId, img.dataset.src);
+    return null;
+  }
+
+  makeBitmap(id, src) {
+    if (this.bitmaps.get(id)?.src === src) return;
+    const entry = { src, bitmap: null };
+    this.bitmaps.set(id, entry);
+    const m = store.getMedia(id);
+    // Para la vista previa bastan 1280 px de lado mayor: ahorra memoria y subirla a la gráfica es más rápido.
+    const k = m && m.width && m.height ? Math.min(1, 1280 / Math.max(m.width, m.height)) : 1;
+    const opts = k < 1 ? { resizeWidth: Math.round(m.width * k), resizeHeight: Math.round(m.height * k), resizeQuality: 'high' } : {};
+    fetch(src)
+      .then((r) => r.blob())
+      .then((blob) => createImageBitmap(blob, opts))
+      .then((bitmap) => {
+        if (this.bitmaps.get(id) !== entry) return bitmap.close();
+        entry.bitmap = bitmap;
+        this.emitChange(id);
+      })
+      .catch(() => {
+        // Sin copia decodificada se dibuja la imagen normal (como antes).
+        entry.failed = true;
+        this.emitChange(id);
+      });
+  }
+
   async loadThumbs(m) {
     if (this.thumbs.has(m.id)) return;
     this.thumbs.set(m.id, []);
-    const list = await api.media.thumbs(m.path, m.duration);
+    const list = await api.media.thumbs(m.path, m.duration, { vcodec: m.vcodec });
     const arr = list.map((t) => {
       const img = new Image();
       img.onload = () => this.emitChange(m.id);
@@ -220,6 +289,11 @@ class MediaManager extends EventTarget {
     return null;
   }
 
+  // Igual que poster() pero listo para dibujar en un canvas.
+  posterDrawable(m) {
+    return m.kind === 'image' ? this.getDrawable(m.id) : this.poster(m);
+  }
+
   async loadPeaks(m) {
     if (this.peaks.has(m.id)) return;
     this.peaks.set(m.id, null);
@@ -236,6 +310,8 @@ class MediaManager extends EventTarget {
     this.thumbs.delete(mediaId);
     this.peaks.delete(mediaId);
     this.images.delete(mediaId);
+    this.bitmaps.get(mediaId)?.bitmap?.close();
+    this.bitmaps.delete(mediaId);
     this.status.delete(mediaId);
   }
 

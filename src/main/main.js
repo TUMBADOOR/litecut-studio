@@ -2,6 +2,7 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, Menu, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
@@ -34,7 +35,11 @@ const isMac = process.platform === 'darwin';
 const TEST_SCRIPT = process.env.LITECUT_TEST || null;
 
 app.setName('LiteCut Studio');
+// Las pruebas automáticas pueden usar su propia carpeta de datos (no tocan el autoguardado del usuario).
+if (TEST_SCRIPT && process.env.LITECUT_USER_DATA) app.setPath('userData', process.env.LITECUT_USER_DATA);
 if (process.platform === 'win32') app.setAppUserModelId('com.litecut.studio');
+// La prioridad de los procesos la gestiona la app (ver setAppPriority); Chromium no debe devolverla a «normal».
+app.commandLine.appendSwitch('disable-renderer-priority-management');
 if (isMac) {
   // Intento de audio del sistema en macOS 13+ (si la versión de Chromium lo soporta).
   app.commandLine.appendSwitch('enable-features', 'MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride');
@@ -131,6 +136,52 @@ function send(channel, payload) {
 
 function errInfo(err) {
   return { message: err?.message || String(err), details: err?.details || '' };
+}
+
+// ---------- Rendimiento ----------
+// Mientras la ventana está en primer plano, los procesos de la app (interfaz, gráfica, audio y el que sirve
+// los archivos) tienen prioridad sobre los programas normales: la vista previa y el sonido no se traban
+// aunque otros programas usen mucha CPU. Al pasar a segundo plano vuelven a la prioridad normal.
+function setAppPriority(boost) {
+  const { PRIORITY_ABOVE_NORMAL, PRIORITY_NORMAL } = os.constants.priority;
+  for (const m of app.getAppMetrics()) {
+    const audio = m.type === 'Utility' && /audio/i.test(`${m.serviceName || ''} ${m.name || ''}`);
+    if (m.type !== 'Browser' && m.type !== 'GPU' && m.type !== 'Tab' && !audio) continue;
+    try {
+      os.setPriority(m.pid, boost ? PRIORITY_ABOVE_NORMAL : PRIORITY_NORMAL);
+    } catch {
+      /* sin permiso (p. ej. macOS no permite subirla): se queda como está */
+    }
+  }
+}
+
+function gpuNameFrom(renderer) {
+  const m = /^ANGLE \((.*)\)$/.exec(renderer || '');
+  const parts = (m ? m[1] : renderer || '').split(', ');
+  const name = (parts[1] || parts[0] || '').replace('ANGLE Metal Renderer: ', '').replace(/\s*\(0x[0-9a-f]+\).*$/i, '').replace(/\s+Direct3D.*$/i, '');
+  return name.trim() || null;
+}
+
+// Perfil del equipo para adaptar la app: procesador, memoria, gráfica y codificador por hardware.
+let deviceInfo = null;
+async function deviceProfile() {
+  if (!deviceInfo) {
+    const cpus = os.cpus();
+    const cores = cpus.length || 2;
+    const ramGB = os.totalmem() / 2 ** 30;
+    const gpu = await app.getGPUInfo('complete').catch(() => null);
+    const hw = await getHw().catch(() => null);
+    deviceInfo = {
+      cpu: (cpus[0]?.model || '').replace(/\s+/g, ' ').trim(),
+      cores,
+      ramGB,
+      gpu: gpuNameFrom(gpu?.auxAttributes?.glRenderer),
+      hwEncoder: hw?.h264 || null,
+      // «low»: 4 núcleos o menos, o menos de 6 GB de memoria (portátiles Celeron/Pentium/Atom y similares).
+      tier: cores <= 4 || ramGB < 6 ? 'low' : cores < 8 || ramGB < 12 ? 'mid' : 'high',
+    };
+  }
+  return { ...deviceInfo, freeRamGB: os.freemem() / 2 ** 30 };
 }
 
 // ---------- Protocolos ----------
@@ -239,6 +290,14 @@ function createMainWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  mainWindow.on('focus', () => setAppPriority(true));
+  // Grabando la pantalla la ventana se minimiza, pero la grabación necesita la prioridad igual.
+  mainWindow.on('blur', () => setAppPriority(!!recorder.active));
+  // Algunos procesos (el de audio, por ejemplo) nacen después del foco: se repasa cada pocos segundos.
+  const keepPriority = setInterval(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && (mainWindow.isFocused() || recorder.active)) setAppPriority(true);
+  }, 5000);
+  mainWindow.on('closed', () => clearInterval(keepPriority));
   // Abrir enlaces externos en el navegador del sistema.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
@@ -273,6 +332,9 @@ function runTestScript() {
     if (bar && !bar.isDestroyed()) bar.webContents.send('recbar:command', cmd);
     return !!bar;
   });
+  ipcMain.handle('test:metrics', () =>
+    app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, name: m.serviceName || m.name || '', cpu: m.cpu.percentCPUUsage, ramMB: Math.round(m.memory.workingSetSize / 1024) }))
+  );
   ipcMain.handle('test:done', (_e, code) => {
     forceClose = true;
     setTimeout(() => app.exit(code || 0), 200);
@@ -298,6 +360,7 @@ function registerIpc() {
     ffmpeg: (await getVersion()).text,
     paths: { videos: app.getPath('videos'), recordings: recordingsDir, documents: app.getPath('documents'), pictures: app.getPath('pictures') },
   }));
+  ipcMain.handle('device:profile', () => deviceProfile());
   ipcMain.on('win:dirty', (_e, v) => {
     dirty = !!v;
     if (mainWindow) mainWindow.setDocumentEdited?.(dirty);
@@ -409,7 +472,7 @@ function registerIpc() {
       return { ok: false, error: errInfo(err) };
     }
   });
-  ipcMain.handle('media:thumbs', async (_e, file, duration) => {
+  ipcMain.handle('media:thumbs', async (_e, file, duration, opts = {}) => {
     try {
       const dir = path.join(cacheDir, 'thumbs', cacheKey(file));
       const index = path.join(dir, 'index.json');
@@ -417,8 +480,10 @@ function registerIpc() {
         const list = JSON.parse(fs.readFileSync(index, 'utf8'));
         if (list.every((t) => fs.existsSync(t.file))) return list;
       }
-      const count = duration > 1200 ? 120 : duration > 300 ? 80 : 40;
-      const list = await fastJobs.run(() => extractThumbs(file, dir, { duration, count, height: 72 }));
+      // El decodificador de AV1 no sabe saltar a los fotogramas clave: se busca cada miniatura por separado.
+      const seek = opts.vcodec === 'av1';
+      const count = seek ? 30 : duration > 1200 ? 120 : duration > 300 ? 80 : 40;
+      const list = await fastJobs.run(() => extractThumbs(file, dir, { duration, count, height: 72, seek }));
       fs.writeFileSync(index, JSON.stringify(list));
       return list;
     } catch {

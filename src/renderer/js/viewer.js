@@ -6,6 +6,8 @@ import { icon } from './icons.js';
 import { formatTime, clipEnd, isVisual, videoTracks } from '../shared/model.js';
 import { clipBox } from './render.js';
 import { Player } from './player.js';
+import { media } from './media.js';
+import { showDeviceDialog } from './device-dialog.js';
 
 export class Viewer {
   constructor(root) {
@@ -23,8 +25,10 @@ export class Viewer {
       h('div', { class: 'hint' }, 'También puedes grabar tu pantalla con el botón «Grabar»')
     );
     this.overlay.append(this.guides.v, this.guides.h);
-    this.stage.append(this.canvas, this.overlay, this.empty);
+    this.buffer = h('div', { class: 'stage-buffer' }, h('span', { class: 'spinner' }), 'Cargando…');
+    this.stage.append(this.canvas, this.overlay, this.empty, this.buffer);
     this.player = new Player(this.canvas);
+    this.player.addEventListener('buffering', () => this.stage.classList.toggle('buffering', this.player.holding));
 
     this.timeLabel = h('span', { class: 'tc' }, '00:00:00');
     this.durLabel = h('span', { class: 'tc dim' }, '00:00:00');
@@ -42,10 +46,18 @@ export class Viewer {
         this.qualityBtn.textContent = label;
         localStorage.setItem('litecut.quality', q);
       };
+      const q = this.player.quality;
       contextMenu(r.left, r.bottom + 4, [
-        { label: 'Alta (1080p)', onClick: () => set('high', 'Alta') },
-        { label: 'Media (720p)', onClick: () => set('medium', 'Media') },
-        { label: 'Baja (480p) — más fluida', onClick: () => set('low', 'Baja') },
+        { label: 'Alta (1080p)', icon: q === 'high' ? 'check' : null, onClick: () => set('high', 'Alta') },
+        { label: 'Media (720p)', icon: q === 'medium' ? 'check' : null, onClick: () => set('medium', 'Media') },
+        { label: 'Baja (480p) — más fluida', icon: q === 'low' ? 'check' : null, onClick: () => set('low', 'Baja') },
+        'sep',
+        {
+          label: 'Copias ligeras de videos pesados',
+          icon: media.prefs.autoOptimize ? 'check' : null,
+          onClick: () => media.setAutoOptimize(!media.prefs.autoOptimize),
+        },
+        { label: 'Rendimiento de este equipo…', icon: 'info', onClick: () => showDeviceDialog() },
       ]);
     });
     const q = localStorage.getItem('litecut.quality') || 'medium';

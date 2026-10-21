@@ -56,9 +56,12 @@ contextBridge.exposeInMainWorld('api', {
     writeMedia: (name, data) => invoke('fs:writeMedia', name, data),
     writeBinary: (file, data) => invoke('fs:writeBinary', file, data),
   },
+  device: {
+    profile: () => invoke('device:profile'),
+  },
   media: {
     probe: (file) => invoke('media:probe', file),
-    thumbs: (file, duration) => invoke('media:thumbs', file, duration),
+    thumbs: (file, duration, opts) => invoke('media:thumbs', file, duration, opts),
     peaks: (file) => invoke('media:peaks', file),
     proxy: (opts) => invoke('media:proxy', opts),
     frame: (file, time) => invoke('media:frame', file, time),
@@ -106,6 +109,7 @@ contextBridge.exposeInMainWorld('api', {
     allowWrite: (file) => invoke('test:allowWrite', file),
     capture: (name) => invoke('test:capture', name),
     log: (msg) => invoke('test:log', msg),
+    metrics: () => invoke('test:metrics'),
     done: (code) => invoke('test:done', code),
   },
 });

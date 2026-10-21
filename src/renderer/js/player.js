@@ -7,6 +7,12 @@ import { projectDuration, clipEnd, clipHasAudio, snapToFrame } from '../shared/m
 import { mainTrackItems } from '../shared/layout.js';
 
 const QUALITY_CAP = { high: 1920, medium: 1280, low: 854 };
+// Desfase (s) a partir del cual se corrige un elemento que ya está reproduciéndose.
+const RESYNC = { audio: 0.25, video: 0.45 };
+// Tras corregir un elemento se espera antes de volver a hacerlo: en un equipo lento, saltar tarda.
+const RESYNC_COOLDOWN = 1500;
+// Lo máximo que el reloj espera a un medio que no está listo antes de seguir sin él.
+const MAX_HOLD = 3000;
 
 export class Player extends EventTarget {
   constructor(canvas) {
@@ -25,8 +31,14 @@ export class Player extends EventTarget {
     this.volume = 1;
     this.cacheVersion = -1;
     this.mainItems = [];
+    this.holding = false;
+    this.holdSince = 0;
+    this.lastDraw = 0;
     this.loop = this.loop.bind(this);
     requestAnimationFrame(this.loop);
+    // Abrir el dispositivo de audio tarda (más de un segundo con la CPU ocupada): se abre por adelantado y se
+    // deja abierto, para que el sonido arranque al instante al reproducir.
+    setTimeout(() => this.ensureAudio(), 1500);
     store.on('change', () => {
       this.dirty = true;
       if (this.time > this.duration) this.time = this.duration;
@@ -95,6 +107,7 @@ export class Player extends EventTarget {
   pause() {
     if (!this.playing) return;
     this.playing = false;
+    this.setHolding(false);
     for (const r of this.els.values()) {
       if (!r.el.paused) r.el.pause();
       if (r.gain) r.gain.gain.value = 0;
@@ -159,6 +172,21 @@ export class Player extends EventTarget {
   loop(now) {
     requestAnimationFrame(this.loop);
     if (this.playing) {
+      // Si un medio que debería verse u oírse aún no está listo (está buscando o le faltan datos), el reloj
+      // lo espera. Seguir adelante lo obligaba a saltar una y otra vez: el video se congelaba y el audio se cortaba.
+      if (this.waitingFor(now)) {
+        if (!this.holding) this.setHolding(true);
+        this.t0 = this.time;
+        this.p0 = now;
+        this.syncEls(false);
+        if (this.dirty) this.draw();
+        return;
+      }
+      if (this.holding) {
+        this.setHolding(false);
+        this.t0 = this.time;
+        this.p0 = now;
+      }
       const d = this.duration;
       let t = this.t0 + (now - this.p0) / 1000;
       if (t >= d) {
@@ -171,10 +199,37 @@ export class Player extends EventTarget {
       this.emit('time');
       this.syncEls(false);
       this.updateGains();
-      this.draw();
+      // No hace falta dibujar más veces por segundo que los fotogramas del proyecto.
+      if (now - this.lastDraw >= 1000 / Math.min(60, this.fps) - 4) this.draw();
     } else if (this.dirty) {
       this.draw();
     }
+  }
+
+  setHolding(on) {
+    if (this.holding === on) return;
+    this.holding = on;
+    this.holdSince = on ? performance.now() : 0;
+    this.emit('buffering');
+  }
+
+  // Primer medio activo que todavía no puede reproducirse (o null). Tras MAX_HOLD se deja de esperarlo.
+  waitingFor(now) {
+    // Mientras la salida de audio no está en marcha, los elementos con sonido no avanzan: hay que esperarla.
+    const audioOff = this.audioCtx && this.audioCtx.state !== 'running' && (!this.holding || now - this.holdSince < MAX_HOLD);
+    for (const rec of this.els.values()) {
+      if (audioOff && rec.active && rec.withAudio) return rec;
+      const el = rec.el;
+      const atEnd = el.ended || (el.duration > 0 && el.currentTime >= el.duration - 0.1);
+      const ready = !rec.active || el.error || atEnd || (!el.seeking && !rec.stalled && el.readyState >= 2);
+      if (ready) {
+        rec.waitSince = 0;
+        continue;
+      }
+      if (!rec.waitSince) rec.waitSince = now;
+      if (now - rec.waitSince < MAX_HOLD) return rec;
+    }
+    return null;
   }
 
   syncEls(force) {
@@ -208,6 +263,7 @@ export class Player extends EventTarget {
       if (!rec) rec = this.createEl(clip, src, needAudio);
       rec.clip = clip;
       rec.idleSince = 0;
+      rec.active = active;
       const target = Math.max(0, Math.min((m.duration || 1e9) - 0.02, clip.in + (Math.max(t, s) - clip.start) * clip.speed));
       const el = rec.el;
       if (Math.abs(el.playbackRate - clip.speed) > 1e-6) {
@@ -217,20 +273,23 @@ export class Player extends EventTarget {
           /* velocidad fuera de rango */
         }
       }
-      if (this.playing && active) {
+      if (this.playing && active && !this.holding) {
         if (el.paused) {
-          if (Math.abs(el.currentTime - target) > 0.04) el.currentTime = target;
+          if (!el.seeking && Math.abs(el.currentTime - target) > 0.1) this.seekEl(rec, target);
           el.play().catch(() => {});
-        } else if (Math.abs(el.currentTime - target) > 0.3) {
-          el.currentTime = target;
+        } else if (!el.seeking && Math.abs(el.currentTime - target) > RESYNC[rec.kind === 'audio' ? 'audio' : 'video'] && now - (rec.seekAt || 0) > RESYNC_COOLDOWN) {
+          this.seekEl(rec, target);
         }
       } else {
         if (!el.paused) el.pause();
-        if (force || Math.abs(el.currentTime - target) > 0.5 / this.fps) this.seekEl(rec, target);
+        // Durante una espera solo se pausa: reajustar unos milisegundos obligaría a buscar de nuevo (caro).
+        const tol = this.holding ? 0.15 : 0.5 / this.fps;
+        if (force || Math.abs(el.currentTime - target) > tol) this.seekEl(rec, target);
       }
     }
     for (const [id, rec] of this.els) {
       if (wanted.has(id)) continue;
+      rec.active = false;
       if (!rec.el.paused) rec.el.pause();
       if (rec.gain) rec.gain.gain.value = 0;
       if (!rec.idleSince) rec.idleSince = now;
@@ -244,6 +303,7 @@ export class Player extends EventTarget {
       return;
     }
     if (Math.abs(rec.el.currentTime - target) < 0.0005 && rec.el.readyState >= 2) return;
+    rec.seekAt = performance.now();
     rec.el.currentTime = target;
   }
 
@@ -253,7 +313,7 @@ export class Player extends EventTarget {
     el.preload = 'auto';
     el.playsInline = true;
     el.disableRemotePlayback = true;
-    const rec = { el, src, kind: clip.type, withAudio, clip, pendingSeek: null, idleSince: 0 };
+    const rec = { el, src, kind: clip.type, withAudio, clip, pendingSeek: null, idleSince: 0, active: false, seekAt: 0, waitSince: 0, stalled: false };
     el.addEventListener('seeked', () => {
       this.dirty = true;
       if (rec.pendingSeek !== null) {
@@ -265,6 +325,12 @@ export class Player extends EventTarget {
     el.addEventListener('loadeddata', () => {
       this.dirty = true;
     });
+    // «waiting»: se quedó sin datos mientras sonaba; vuelve a estar listo con «playing» o «canplay».
+    el.addEventListener('waiting', () => {
+      if (!el.paused) rec.stalled = true;
+    });
+    el.addEventListener('playing', () => (rec.stalled = false));
+    el.addEventListener('canplay', () => (rec.stalled = false));
     if (withAudio) {
       const ac = this.ensureAudio();
       rec.source = ac.createMediaElementSource(el);
@@ -319,14 +385,15 @@ export class Player extends EventTarget {
     this.master.gain.value = this.muted ? 0 : this.volume;
   }
 
-  envFor(scale) {
+  envFor(scale, still = false) {
     this.refreshCache();
     return {
       project: store.project,
       scale,
       mainItems: this.mainItems,
       getMedia: (id) => store.getMedia(id),
-      getImage: (id) => media.getImage(id),
+      // La vista previa usa la copia decodificada (sin tirones); un fotograma guardado, la imagen original.
+      getImage: (id) => (still ? media.getImage(id) : media.getDrawable(id)),
       getVideo: (clip) => {
         const r = this.els.get(clip.id);
         return r && r.el.readyState >= 2 ? r.el : null;
@@ -336,6 +403,7 @@ export class Player extends EventTarget {
 
   draw() {
     this.dirty = false;
+    this.lastDraw = performance.now();
     drawFrame(this.ctx, this.time, this.envFor(this.scale));
     this.emit('drawn');
   }
@@ -349,7 +417,7 @@ export class Player extends EventTarget {
     const c = document.createElement('canvas');
     c.width = Math.round(p.settings.width * scale);
     c.height = Math.round(p.settings.height * scale);
-    drawFrame(c.getContext('2d'), this.time, this.envFor(scale));
+    drawFrame(c.getContext('2d'), this.time, this.envFor(scale, true));
     return c;
   }
 }

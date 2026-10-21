@@ -127,6 +127,10 @@ export class Panels {
     if (m.kind !== 'image') thumb.append(h('span', { class: 'mc-dur' }, formatDurationShort(m.duration)));
     if (m.missing) thumb.append(h('span', { class: 'mc-status err' }, 'Archivo no encontrado'));
     else if (st.state === 'proxy') thumb.append(h('span', { class: 'mc-status' }, `Optimizando ${Math.round((st.progress || 0) * 100)}%`));
+    else if (st.optimizing) {
+      const title = 'Creando una copia ligera para editar con fluidez en este equipo. Al exportar se usa el original.';
+      thumb.append(h('span', { class: 'mc-status', title }, `Optimizando ${Math.round((st.progress || 0) * 100)}%`));
+    }
     else if (st.state === 'checking') thumb.append(h('span', { class: 'mc-status' }, 'Analizando…'));
     else if (st.state === 'error') thumb.append(h('span', { class: 'mc-status err' }, 'Error'));
     const add = h('button', { class: 'mc-add', type: 'button', title: 'Añadir a la línea de tiempo', html: icon('plus', 16) });
@@ -284,7 +288,7 @@ export class Panels {
     const sel = store.selectedClips.filter((c) => c.type === 'video' || c.type === 'image');
     wrap.append(this.head('Filtros'));
     const m = sel[0] ? store.getMedia(sel[0].mediaId) : store.project.media.find((x) => x.kind !== 'audio');
-    const poster = m ? media.poster(m) : null;
+    const poster = m ? media.posterDrawable(m) : null;
     const grid = h('div', { class: 'filter-grid big' });
     for (const f of FILTER_PRESETS) {
       const cv = h('canvas', { width: 116, height: 70 });

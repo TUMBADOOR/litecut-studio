@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runFfmpeg, probe, ffmpegVersion, filterScriptArgs, encoderArgs, lastLines } from '../src/main/ffmpeg.js';
+import { runFfmpeg, probe, ffmpegVersion, filterScriptArgs, encoderArgs, lastLines, listKeyframes, extractThumbs } from '../src/main/ffmpeg.js';
 import { buildExportGraph } from '../src/shared/export-graph.js';
 import { createProject, createClip, createTrack } from '../src/shared/model.js';
 import { TRANSITIONS, FILTER_PRESETS } from '../src/shared/effects.js';
@@ -196,6 +196,31 @@ if (!quick) {
     createClip('image', { trackId: V1.id, mediaId: 'mi', start: 4.5, duration: 1.5, bgFill: 'blur', kenburns: 'zoom-in' }),
   ];
   check(await exportProject(p3, 'vertical-desenfoque', { width: 360, height: 640 }));
+}
+
+// ---------- Fotogramas clave y miniaturas ----------
+{
+  console.log('Miniaturas:');
+  // Un fotograma clave por segundo exacto: la lista debe encontrarlos sin decodificar el video.
+  const kf = await gen('kf.mp4', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '30', '-keyint_min', '30', '-sc_threshold', '0', '-pix_fmt', 'yuv420p']);
+  const keys = await listKeyframes(kf);
+  const okKeys = keys.length === 6 && keys.every((t, i) => Math.abs(t - i) < 0.05);
+  console.log(`  ${okKeys ? '✓' : '✗'} fotogramas clave: ${keys.map((t) => t.toFixed(2)).join(' ')}`);
+  check(okKeys);
+  // Los dos métodos (saltar a fotogramas clave al decodificar, o buscar cada uno: AV1) dan miniaturas en orden.
+  for (const seek of [false, true]) {
+    const list = await extractThumbs(kf, path.join(dir, `miniaturas-${seek ? 'busqueda' : 'clave'}`), { duration: 6, count: 6, height: 36, seek });
+    const ok = list.length >= 5 && list.every((t, i) => fs.existsSync(t.file) && (i === 0 || t.t > list[i - 1].t));
+    console.log(`  ${ok ? '✓' : '✗'} miniaturas ${seek ? 'buscando cada fotograma clave' : 'decodificando solo los clave'}: ${list.length} (${list.map((t) => t.t.toFixed(1)).join(' ')})`);
+    check(ok);
+  }
+  // MPEG-TS empieza en ~1,4 s: los instantes deben contarse desde el inicio del archivo (como en el visor).
+  const ts = await gen('v3.ts', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=25:d=6', '-f', 'lavfi', '-i', 'sine=f=300:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-f', 'mpegts']);
+  const tsKeys = await listKeyframes(ts);
+  const tsList = await extractThumbs(ts, path.join(dir, 'miniaturas-ts'), { duration: 6, count: 4, height: 36, seek: true });
+  const okTs = tsKeys.length > 0 && Math.abs(tsKeys[0]) < 0.1 && tsList.length > 0 && tsList[0].t < 0.1;
+  console.log(`  ${okTs ? '✓' : '✗'} MPEG-TS: primer fotograma clave en ${tsKeys[0]?.toFixed(2)} s, ${tsList.length} miniaturas`);
+  check(okTs);
 }
 
 console.log(failures ? `\n${failures} prueba(s) fallaron` : '\nTodas las pruebas pasaron');

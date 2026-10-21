@@ -1,10 +1,14 @@
 // Utilidades de FFmpeg para el proceso principal (sin dependencias de Electron para poder probarlas con Node).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+
+// Las tareas de fondo (miniaturas, ondas, copias ligeras) ceden la CPU a la vista previa y al resto del equipo.
+export const BACKGROUND_PRIORITY = os.constants.priority.PRIORITY_BELOW_NORMAL;
 
 function resolveFfmpeg() {
   if (process.env.LITECUT_FFMPEG) return process.env.LITECUT_FFMPEG;
@@ -24,8 +28,9 @@ export const ffmpegPath = resolveFfmpeg();
 /**
  * Ejecuta FFmpeg. Resuelve siempre (no rechaza) con { code, stderr, killed }.
  * onStdout recibe trozos (Buffer) de la salida estándar; onLine recibe líneas de stderr.
+ * priority (opcional): prioridad del proceso, p. ej. BACKGROUND_PRIORITY.
  */
-export function runFfmpeg(args, { onStdout, onLine, signal, maxStderr = 200000 } = {}) {
+export function runFfmpeg(args, { onStdout, onLine, signal, maxStderr = 200000, priority } = {}) {
   return new Promise((resolve) => {
     let stderr = '';
     let killed = false;
@@ -35,6 +40,13 @@ export function runFfmpeg(args, { onStdout, onLine, signal, maxStderr = 200000 }
     } catch (err) {
       resolve({ code: -1, stderr: String(err), killed: false });
       return;
+    }
+    if (priority !== undefined && proc.pid) {
+      try {
+        os.setPriority(proc.pid, priority);
+      } catch {
+        /* sin permiso: se queda con la prioridad normal */
+      }
     }
     const kill = () => {
       killed = true;
@@ -173,9 +185,61 @@ export async function probe(file) {
 
 // ---------- Miniaturas (solo fotogramas clave: muy rápido) ----------
 
-export async function extractThumbs(file, outDir, { duration = 0, count = 40, height = 72, start = 0, signal } = {}) {
+// Instantes de los fotogramas clave del primer video, en segundos desde el inicio del archivo (FFmpeg ya
+// descuenta el desfase inicial del contenedor, igual que el visor). Solo lee paquetes, sin decodificar.
+export async function listKeyframes(file, { signal } = {}) {
+  const keys = [];
+  let tb = 0.001;
+  let partial = '';
+  const parse = (line) => {
+    if (line.startsWith('#tb 0:')) {
+      const [n, d] = line.slice(6).trim().split('/').map(Number);
+      if (n > 0 && d > 0) tb = n / d;
+      return;
+    }
+    if (!line || line[0] === '#') return;
+    const flags = /F=0x([0-9a-f]+)/i.exec(line);
+    if (flags && !(parseInt(flags[1], 16) & 1)) return;
+    const pts = Number(line.split(',')[2]);
+    if (Number.isFinite(pts)) keys.push(pts * tb);
+  };
+  await runFfmpeg(['-hide_banner', '-nostdin', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'framecrc', '-'], {
+    signal,
+    priority: BACKGROUND_PRIORITY,
+    onStdout: (d) => {
+      partial += d.toString();
+      const lines = partial.split('\n');
+      partial = lines.pop();
+      for (const l of lines) parse(l.trim());
+    },
+  });
+  parse(partial.trim());
+  return keys.sort((a, b) => a - b);
+}
+
+// Para códecs cuyo decodificador no sabe saltarse los fotogramas intermedios (AV1): se busca cada
+// fotograma clave y se decodifica solo ese, en vez de decodificar el video entero.
+async function thumbsBySeeking(file, outDir, { count, height, signal }) {
+  const keys = await listKeyframes(file, { signal });
+  if (!keys.length) keys.push(0);
+  const step = Math.max(1, keys.length / count);
+  const list = [];
+  for (let i = 0; i < keys.length && list.length < count; i += step) {
+    if (signal?.aborted) break;
+    const t = Math.max(0, keys[Math.floor(i)]);
+    const out = path.join(outDir, `t_${String(list.length + 1).padStart(4, '0')}.jpg`);
+    const args = ['-hide_banner', '-nostdin', '-y', '-ss', (t + 0.001).toFixed(3), '-noaccurate_seek', '-i', file];
+    args.push('-an', '-sn', '-frames:v', '1', '-vf', `scale=-2:${height}`, '-q:v', '7', out);
+    const r = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY });
+    if (r.code === 0 && fs.existsSync(out)) list.push({ t, file: out });
+  }
+  return list;
+}
+
+export async function extractThumbs(file, outDir, { duration = 0, count = 40, height = 72, start = 0, signal, seek = false } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const f of fs.readdirSync(outDir)) if (f.endsWith('.jpg')) fs.rmSync(path.join(outDir, f), { force: true });
+  if (seek) return thumbsBySeeking(file, outDir, { count, height, signal });
   const interval = Math.max(0.5, (duration || 10) / count);
   const run = async (keyOnly) => {
     const times = [];
@@ -187,6 +251,7 @@ export async function extractThumbs(file, outDir, { duration = 0, count = 40, he
     args.push('-i', file, '-an', '-sn', '-vf', vf, '-fps_mode', 'vfr', '-q:v', '7', '-frames:v', String(count * 2 + 10), path.join(outDir, 't_%04d.jpg'));
     await runFfmpeg(args, {
       signal,
+      priority: BACKGROUND_PRIORITY,
       onLine: (l) => {
         const m = /Parsed_showinfo.*?pts_time:\s*(-?[\d.]+)/.exec(l);
         if (m) times.push(Math.max(0, parseFloat(m[1]) - start));
@@ -213,6 +278,7 @@ export function extractPeaks(file, { perSec = 50, rate = 8000, signal } = {}) {
   let leftover = null;
   return runFfmpeg(['-hide_banner', '-nostdin', '-i', file, '-vn', '-sn', '-ac', '1', '-ar', String(rate), '-f', 's16le', '-acodec', 'pcm_s16le', 'pipe:1'], {
     signal,
+    priority: BACKGROUND_PRIORITY,
     onStdout: (chunk) => {
       let buf = chunk;
       if (leftover) {
@@ -263,7 +329,8 @@ export function progressParser(total, onProgress) {
   };
 }
 
-// ---------- Proxy de edición (para formatos que el visor no reproduce) ----------
+// ---------- Proxy de edición (formatos que el visor no reproduce o videos demasiado pesados para el equipo) ----------
+// 720p H.264 (la gráfica lo decodifica casi en cualquier equipo) con un fotograma clave cada 30: saltar es inmediato.
 
 export async function makeProxy(file, outPath, { kind = 'video', duration = 0, hasAudio = true, onProgress, signal } = {}) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -296,7 +363,7 @@ export async function makeProxy(file, outPath, { kind = 'video', duration = 0, h
     );
   }
   args.push('-progress', 'pipe:1', '-nostats', tmp);
-  const res = await runFfmpeg(args, { signal, onStdout: progressParser(duration, (p) => onProgress && onProgress(p.percent)) });
+  const res = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY, onStdout: progressParser(duration, (p) => onProgress && onProgress(p.percent)) });
   if (res.code !== 0 || !fs.existsSync(tmp)) {
     fs.rmSync(tmp, { force: true });
     const err = new Error(res.killed ? 'Cancelado' : 'No se pudo convertir el archivo');

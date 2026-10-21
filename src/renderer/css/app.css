@@ -802,6 +802,37 @@ kbd {
 .stage-empty .hint {
   font-size: 11.5px;
 }
+/* Aviso «Cargando…» cuando la reproducción espera a un video (aparece solo si la espera dura). */
+.stage-buffer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.stage.buffering .stage-buffer {
+  opacity: 1;
+  transition: opacity 0.2s 0.4s;
+}
+.stage-buffer .spinner {
+  width: 12px;
+  height: 12px;
+  animation: none;
+}
+.stage.buffering .stage-buffer .spinner {
+  animation: spin 0.8s linear infinite;
+}
 .guide {
   position: absolute;
   display: none;
@@ -2111,6 +2142,71 @@ pre.details {
 .about p {
   color: var(--dim);
   line-height: 1.5;
+}
+
+/* ---------- Rendimiento de este equipo ---------- */
+.device {
+  display: grid;
+  gap: 8px;
+}
+.dv-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.dv-k {
+  color: var(--faint);
+}
+.dv-v {
+  color: var(--text);
+}
+.dv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--line2);
+}
+.dv-chip.ok {
+  color: #3ddc97;
+}
+.dv-chip.no {
+  color: #ff8a8a;
+}
+.device h3 {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.device ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dim);
+  line-height: 1.5;
+  display: grid;
+  gap: 4px;
+}
+.dv-warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.12);
+  color: #ffc861;
+  line-height: 1.4;
+}
+.dv-warn svg {
+  flex: none;
+  margin-top: 2px;
 }
 
 /* ---------- Bienvenida ---------- */

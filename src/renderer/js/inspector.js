@@ -363,7 +363,7 @@ export class Inspector {
   colorTab(c, m) {
     const box = h('div');
     const grid = h('div', { class: 'filter-grid' });
-    const poster = m ? media.poster(m) : null;
+    const poster = m ? media.posterDrawable(m) : null;
     if (!poster) this._posterOk = false;
     for (const f of FILTER_PRESETS) {
       const cv = h('canvas', { width: 76, height: 48 });

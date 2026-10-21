@@ -30,6 +30,14 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
 - Usa la tarjeta gráfica si existe (Intel Quick Sync, NVIDIA NVENC, AMD AMF, Apple VideoToolbox) y, si falla, la CPU.
 - Lo que ves en la vista previa es lo que se exporta: textos, filtros, máscaras, transiciones y animaciones usan la misma matemática en ambos.
 
+**Rendimiento en equipos modestos**
+- Detecta el procesador, la memoria y qué formatos decodifica la gráfica (menú de calidad del visor › «Rendimiento de este equipo…»).
+- Los videos que el equipo no mueve con soltura (por ejemplo AV1, o 1440p/4K en portátiles modestos) se editan con una
+  **copia ligera** de 720p creada en segundo plano. La exportación usa siempre el archivo original.
+- Mientras la ventana está activa, la app tiene prioridad sobre otros programas; miniaturas, ondas de audio y copias ligeras
+  se crean con prioridad baja para no trabar nada.
+- Si un video tarda en cargar, la reproducción espera un instante (aviso «Cargando…») en vez de saltar y cortar el audio.
+
 ## Usar la app en Windows
 
 En la carpeta `dist` está:

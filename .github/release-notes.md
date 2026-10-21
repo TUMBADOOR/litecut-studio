@@ -1,3 +1,14 @@
+## Novedades en 1.0.1: fluida en equipos modestos
+
+- La vista previa ya no salta ni corta el audio cuando un video tarda en cargar: espera un instante (aviso «Cargando…»).
+- **Copias ligeras automáticas:** los videos que tu equipo no mueve con soltura (por ejemplo AV1, o 1440p/4K en portátiles
+  modestos) se editan con una copia de 720p creada en segundo plano. Al exportar se usa siempre el original.
+- LiteCut tiene prioridad sobre los demás programas mientras está en primer plano o grabando; las miniaturas, las ondas de
+  audio y las copias ligeras se crean con prioridad baja.
+- Las fotos grandes ya no congelan la app al aparecer en la vista previa, y las miniaturas de los videos AV1 se crean en segundos.
+- Nuevo: botón de calidad del visor › **Rendimiento de este equipo…** muestra el procesador, la memoria, la gráfica y qué
+  formatos acelera, y permite desactivar las copias ligeras.
+
 ## Descargas
 
 | Sistema | Archivo |
