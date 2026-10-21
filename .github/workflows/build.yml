@@ -17,6 +17,7 @@ jobs:
   windows:
     name: Windows (x64)
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -35,11 +36,18 @@ jobs:
 
   mac:
     name: macOS (${{ matrix.arch }})
-    runs-on: macos-latest
+    # Los servidores Mac con chip Apple de GitHub suelen estar saturados; desde un Mac Intel
+    # también se compila la versión arm64 (Apple Silicon) sin problema.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x64]
+        include:
+          - arch: arm64
+            runner: macos-15-intel
+          - arch: x64
+            runner: macos-15-intel
     env:
       # Descarga Electron y FFmpeg de la arquitectura de destino (Apple Silicon o Intel).
       npm_config_arch: ${{ matrix.arch }}
@@ -61,7 +69,8 @@ jobs:
 
   release:
     name: Publicar versión
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Se publica aunque falle Mac (al menos queda Windows); con "Re-run failed jobs" se añade Mac luego.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success' }}
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
