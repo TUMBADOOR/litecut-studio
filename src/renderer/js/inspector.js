@@ -5,7 +5,8 @@ import * as edit from './edit.js';
 import * as ops from '../shared/ops.js';
 import { h, clear, sliderRow, selectRow, colorRow, toggleRow, segmented, section, btn } from './ui.js';
 import { icon } from './icons.js';
-import { ADJUST_FIELDS, FILTER_PRESETS, ANIMS_IN, ANIMS_OUT, KENBURNS, TRANSITIONS, MASKS } from '../shared/effects.js';
+import { ADJUST_FIELDS, FILTER_PRESETS, ANIMS_IN, ANIMS_OUT, KENBURNS, TRANSITIONS, MASKS, EFFECTS } from '../shared/effects.js';
+import * as tools from './tools.js';
 import { ASPECTS, formatTime, projectDuration, defaultAdjust, defaultTransform, defaultText, trackClips, clone, mainTrack } from '../shared/model.js';
 import { FONTS, TEXT_PRESETS, ensureFont } from './text-render.js';
 import { cssFilterFor } from './render.js';
@@ -63,6 +64,7 @@ export class Inspector {
       c?.animIn?.type,
       c?.animOut?.type,
       c?.kenburns,
+      (c?.effects || []).map((e) => e.type).join(','),
       c?.bgFill,
       c?.linkedTo,
       c?.muted,
@@ -445,6 +447,22 @@ export class Inspector {
     if (c.type === 'image' || c.type === 'video') {
       box.append(section('Movimiento lento (Ken Burns)', this.choose('Efecto', KENBURNS.map((k) => ({ value: k.id, label: k.name })), (x) => x.kenburns || 'none', (x, v) => (x.kenburns = v))));
     }
+    // Efectos del clip (se añaden desde la pestaña Efectos de la izquierda): intensidad y quitar.
+    const fxRows = (c.effects || []).map((fx) => {
+      const def = EFFECTS.find((e) => e.id === fx.type);
+      const remove = btn('', { kind: 'small ghost', icon: 'close', size: 14, title: 'Quitar el efecto', onClick: () => tools.removeEffect(c.id, fx.type) });
+      const extra = fx.type === 'zoom-pulse' ? ` · cada ${Number(fx.period || 0.5).toFixed(2)} s` : '';
+      return h(
+        'div',
+        { class: 'insp-fx' },
+        h('div', { class: 'insp-fx-head' }, h('span', {}, `${def?.name || fx.type}${extra}`), remove),
+        this.slider('Intensidad', (x) => Math.round((tools.effectOf(x, fx.type)?.intensity ?? 0.5) * 100), (x, v) => {
+          const e = tools.effectOf(x, fx.type);
+          if (e) e.intensity = v / 100;
+        }, { min: 10, max: 100, unit: '%', defaultValue: 50 })
+      );
+    });
+    box.append(section('Efectos', fxRows.length ? h('div', {}, ...fxRows) : h('p', { class: 'hint' }, 'Sin efectos. Añádelos desde la pestaña «Efectos» de la izquierda (temblor, golpe de zoom, destello…).')));
     box.append(h('div', { class: 'btn-row' }, preview));
     return box;
   }
@@ -478,7 +496,7 @@ export class Inspector {
     const rows = h(
       'div',
       {},
-      this.slider('Volumen', (x) => Math.round((x.volume ?? 1) * 100), (x, v) => (x.volume = v / 100), { min: 0, max: 200, unit: '%', defaultValue: 100 }),
+      this.slider('Volumen', (x) => Math.round((x.volume ?? 1) * 100), (x, v) => (x.volume = v / 100), { min: 0, max: 400, unit: '%', defaultValue: 100 }),
       this.slider('Fundido de entrada', (x) => x.fadeIn || 0, (x, v) => (x.fadeIn = v), { min: 0, max: 10, step: 0.1, decimals: 1, unit: 's', defaultValue: 0 }),
       this.slider('Fundido de salida', (x) => x.fadeOut || 0, (x, v) => (x.fadeOut = v), { min: 0, max: 10, step: 0.1, decimals: 1, unit: 's', defaultValue: 0 })
     );
@@ -498,6 +516,20 @@ export class Inspector {
       );
     }
     box.append(section('Audio', rows));
+    if (m?.hasAudio && !c.muted) {
+      box.append(
+        section(
+          'Herramientas',
+          h(
+            'div',
+            { class: 'tool-list' },
+            btn('Normalizar volumen', { kind: 'small', icon: 'volume', onClick: () => tools.normalizeVolume([c.id]), title: 'Deja el volumen como en YouTube o TikTok (−14 LUFS)' }),
+            btn('Quitar silencios', { kind: 'small', icon: 'wave', onClick: () => tools.removeSilences([c.id]), title: 'Corta las pausas de un clip con voz' }),
+            btn('Detectar ritmo', { kind: 'small', icon: 'beat', onClick: () => tools.detectBeats(c.id), title: 'Marcadores en los golpes de la música' })
+          )
+        )
+      );
+    }
     return box;
   }
 

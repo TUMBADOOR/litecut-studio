@@ -3,7 +3,7 @@
 // implementación vive en renderer/js/ai-commands.js. Los esquemas usan un subconjunto sencillo de JSON Schema
 // (sin oneOf ni additionalProperties) que entienden Claude, Gemini, OpenAI y los modelos locales.
 import { ASPECTS } from './model.js';
-import { TRANSITIONS, FILTER_PRESETS, ANIMS_IN, ANIMS_OUT, KENBURNS, MASKS } from './effects.js';
+import { TRANSITIONS, FILTER_PRESETS, ANIMS_IN, ANIMS_OUT, KENBURNS, MASKS, EFFECTS } from './effects.js';
 import { TEXT_PRESETS, FONTS } from './text-presets.js';
 
 export const AI_SERVER_NAME = 'litecut-studio';
@@ -17,6 +17,8 @@ export const AI_INSTRUCTIONS = [
   'Para revisar el resultado usa ver_fotograma. Para entender un video sin reproducirlo usa fotogramas_de_muestra,',
   'detectar_silencios y detectar_escenas. El equipo del usuario puede ser modesto: exportar puede tardar; si exportar',
   'responde que sigue en curso, consulta estado_exportacion. No sobrescribas archivos salvo que el usuario lo pida.',
+  'Para editar al ritmo de una canción usa detectar_ritmo (devuelve los pulsos) y corta o coloca los clips en esos instantes;',
+  'para efectos de «edit» (temblor, impacto, golpe de zoom, pulso, destello) usa aplicar_efecto.',
 ].join(' ');
 
 // ---------- Piezas de los esquemas ----------
@@ -394,6 +396,52 @@ export const AI_TOOLS = [
       fin: num('Hasta este segundo.', { minimum: 0 }),
     }),
     annotations: T,
+  },
+  {
+    name: 'detectar_ritmo',
+    title: 'Detectar ritmo',
+    description:
+      'Analiza la música de un clip de audio (o de un video con sonido) y pone marcadores en sus pulsos: el usuario los ve en la regla y el imán se pega a ellos. Devuelve el tempo (BPM) y el instante de la línea de tiempo de cada pulso, para cortar o colocar clips al ritmo (dividir, recortar_clip, mover_clip).',
+    inputSchema: obj({ clip: CLIP }, ['clip']),
+    annotations: EDIT,
+  },
+  {
+    name: 'aplicar_efecto',
+    title: 'Aplicar efecto',
+    description: `Pone o quita un efecto en clips de video, foto o texto: ${list2(EFFECTS)}. «zoom-pulse» sigue los marcadores de ritmo de su tramo si existen (usa antes detectar_ritmo). Un clip puede tener varios efectos; volver a ponerlo cambia su intensidad.`,
+    inputSchema: obj(
+      {
+        clips: list('Ids de los clips.'),
+        efecto: str('Efecto.', { enum: EFFECTS.map((e) => e.id) }),
+        intensidad: num('De 0.1 a 1 (por defecto 0.5).', { minimum: 0.1, maximum: 1 }),
+        quitar: bool('Quitar el efecto en vez de ponerlo.'),
+      },
+      ['clips', 'efecto']
+    ),
+    annotations: EDIT,
+  },
+  {
+    name: 'invertir_clip',
+    title: 'Invertir clip',
+    description:
+      'Hace que un clip de video o de audio se reproduzca hacia atrás (crea una copia invertida del tramo que usa; en equipos modestos tarda unos segundos por cada segundo de clip). Si el clip ya estaba invertido, vuelve a reproducirse hacia delante.',
+    inputSchema: obj({ clip: CLIP }, ['clip']),
+    annotations: EDIT,
+  },
+  {
+    name: 'normalizar_volumen',
+    title: 'Normalizar volumen',
+    description:
+      'Mide la sonoridad de clips con sonido y ajusta su volumen a −14 LUFS (lo habitual en YouTube, TikTok o Spotify) sin pasar de −1 dB de pico. Sirve para igualar voces o músicas que suenan muy bajo o muy alto.',
+    inputSchema: obj({ clips: list('Ids de los clips con sonido.') }, ['clips']),
+    annotations: EDIT,
+  },
+  {
+    name: 'dividir_por_escenas',
+    title: 'Dividir por escenas',
+    description: 'Divide de una vez un clip de video en cada cambio de plano (escena). Devuelve los ids de los trozos, en orden.',
+    inputSchema: obj({ clip: CLIP }, ['clip']),
+    annotations: EDIT,
   },
   {
     name: 'guardar_proyecto',

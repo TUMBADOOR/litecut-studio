@@ -2,6 +2,7 @@
 import { store } from './store.js';
 import { media } from './media.js';
 import * as edit from './edit.js';
+import * as tools from './tools.js';
 import { Viewer } from './viewer.js';
 import { Timeline } from './timeline.js';
 import { Inspector } from './inspector.js';
@@ -66,6 +67,7 @@ $('#topbar').append(
 const viewer = new Viewer($('#viewer'));
 const player = viewer.player;
 edit.setPlayer(player);
+tools.setToolsPlayer(player);
 const timeline = new Timeline($('#timeline'), viewer);
 const inspector = new Inspector($('#inspector'), { player, onShortcuts: () => showShortcuts() });
 const panels = new Panels($('#sidetabs'), $('#panel'), {
@@ -87,6 +89,7 @@ window.__app = {
   store,
   media,
   edit,
+  tools,
   player,
   viewer,
   timeline,
@@ -533,6 +536,10 @@ document.addEventListener('keydown', (e) => {
     case 'T':
       if (!mod) edit.addText('title');
       break;
+    case 'm':
+    case 'M':
+      if (!mod) tools.toggleMarkerAtPlayhead();
+      break;
     default:
       break;
   }
@@ -649,6 +656,7 @@ function showShortcuts() {
     ['+ / −', 'Acercar / alejar la línea de tiempo'],
     ['Mayús + Z', 'Ajustar la línea de tiempo a la ventana'],
     ['N', 'Activar / desactivar el imán'],
+    ['M', 'Añadir / quitar marcador en el cursor'],
     ['T', 'Añadir texto'],
     [`${modKey} + Rueda`, 'Zoom en la línea de tiempo'],
     ['Alt (al arrastrar)', 'Mover sin imán'],

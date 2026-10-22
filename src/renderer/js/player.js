@@ -255,7 +255,10 @@ export class Player extends EventTarget {
       const preload = this.playing && t >= s - 1.5 && t < s;
       if (!active && !preload) continue;
       wanted.add(clip.id);
-      const src = mediaUrl(media.previewPath(m));
+      // Original o copia ligera (completa o la parte que cubre este clip); off = dónde empieza dentro del original.
+      const sp = clip.speed || 1;
+      const pv = media.previewFor(m, clip.in + (s - clip.start) * sp, clip.in + (e - clip.start) * sp);
+      const src = mediaUrl(pv.path);
       let rec = this.els.get(clip.id);
       if (rec && (rec.src !== src || rec.withAudio !== needAudio || rec.kind !== clip.type)) {
         this.destroyEl(clip.id);
@@ -265,7 +268,8 @@ export class Player extends EventTarget {
       rec.clip = clip;
       rec.idleSince = 0;
       rec.active = active;
-      const target = Math.max(0, Math.min((m.duration || 1e9) - 0.02, clip.in + (Math.max(t, s) - clip.start) * clip.speed));
+      const srcT = Math.max(0, Math.min((m.duration || 1e9) - 0.02, clip.in + (Math.max(t, s) - clip.start) * sp));
+      const target = Math.max(0, Math.min((pv.end || 1e9) - pv.offset - 0.02, srcT - pv.offset));
       const el = rec.el;
       if (Math.abs(el.playbackRate - clip.speed) > 1e-6) {
         try {

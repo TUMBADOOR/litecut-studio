@@ -105,6 +105,7 @@ export function createClip(type, props = {}) {
     transitionIn: null,
     bgFill: 'none', // pista principal: 'none' (color de fondo) o 'blur' (el mismo video desenfocado)
     linkedTo: null, // audio separado: id del clip de video al que sigue
+    effects: [], // efectos de clip: [{ type, intensity, period?, phase? }] (ver EFFECTS en effects.js)
     text: type === 'text' ? defaultText() : null,
   };
   return Object.assign(clip, props);
@@ -124,6 +125,7 @@ export function createProject(aspectId = '16:9') {
     media: [],
     tracks: [createTrack('video'), createTrack('audio')],
     clips: [],
+    markers: [],
   };
 }
 
@@ -149,8 +151,15 @@ export function normalizeProject(p) {
       n.animIn = Object.assign({ type: 'none', duration: 0.6 }, c.animIn || {});
       n.animOut = Object.assign({ type: 'none', duration: 0.6 }, c.animOut || {});
       if (n.type === 'text') n.text = Object.assign(defaultText(), c.text || {});
+      n.effects = (Array.isArray(c.effects) ? c.effects : [])
+        .filter((fx) => fx && typeof fx.type === 'string')
+        .map((fx) => ({ ...fx, intensity: Math.min(1, Math.max(0.1, Number(fx.intensity) || 0.5)) }));
       return n;
     });
+  out.markers = (Array.isArray(p?.markers) ? p.markers : [])
+    .filter((m) => m && Number.isFinite(m.t) && m.t >= 0)
+    .map((m) => ({ id: m.id || uid('mk'), t: m.t, kind: m.kind === 'beat' ? 'beat' : 'user' }))
+    .sort((a, b) => a.t - b.t);
   return out;
 }
 

@@ -19,6 +19,14 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
 - Voz en off: graba tu micrófono mientras se reproduce el video.
 - Proyectos `.lcproj`, recientes y autoguardado con recuperación.
 
+**Efectos y herramientas** (pestaña «Efectos» y clic derecho sobre un clip)
+- Efectos para «edits»: **temblor**, **impacto** (sacudida que se calma), **golpe de zoom**, **pulso al ritmo** y
+  **destello** blanco, con intensidad ajustable (Animación). Se exportan igual que se ven.
+- **Marcadores** (M o la bandera de la barra) y **detección de ritmo**: pone marcadores en los golpes de la música y el
+  imán se pega a ellos para cortar al ritmo. El «pulso al ritmo» sigue esos marcadores.
+- **Quitar silencios** de un clip con voz, **dividir por escenas** (un corte en cada cambio de plano),
+  **normalizar volumen** (−14 LUFS, como YouTube o TikTok) e **invertir** un clip (hacia atrás).
+
 **Grabador de pantalla**
 - Pantalla completa, una ventana o un área personalizada.
 - Micrófono (con medidor de nivel), audio del sistema y cámara web (en una pista aparte, en círculo, que puedes mover).
@@ -32,8 +40,9 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
 
 **Rendimiento en equipos modestos**
 - Detecta el procesador, la memoria y qué formatos decodifica la gráfica (menú de calidad del visor › «Rendimiento de este equipo…»).
-- Los videos que el equipo no mueve con soltura (por ejemplo AV1, o 1440p/4K en portátiles modestos) se editan con una
-  **copia ligera** de 720p creada en segundo plano. La exportación usa siempre el archivo original.
+- Los videos que el equipo no mueve con soltura (por ejemplo AV1, o 1440p/4K en portátiles modestos) se editan con
+  **copias ligeras** de 720p creadas en segundo plano **solo de las partes que usa el proyecto** (segundos en vez de
+  minutos; si añades otra parte, se convierte en cuanto la usas). La exportación usa siempre el archivo original.
 - Mientras la ventana está activa, la app tiene prioridad sobre otros programas; miniaturas, ondas de audio y copias ligeras
   se crean con prioridad baja para no trabar nada.
 - Si un video tarda en cargar, la reproducción espera un instante (aviso «Cargando…») en vez de saltar y cortar el audio.
@@ -46,6 +55,8 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
 - O conecta tu app de IA de escritorio (Claude Desktop, Gemini CLI, Cursor…) por MCP.
 - La IA puede **ver** el proyecto (fotogramas pequeños) y **analizar** los videos sin reproducirlos: silencios,
   cambios de escena y fotogramas de muestra, con FFmpeg y a baja prioridad para no cargar el equipo.
+- También usa las herramientas de edición: detectar el ritmo para cortar al compás, aplicar efectos, invertir clips,
+  normalizar el volumen y dividir por escenas.
 
 ## Conectar con tu IA
 
@@ -209,6 +220,7 @@ build/           Ícono y permisos de macOS para el instalador
 | Alt+← → | Mover clips seleccionados |
 | + / − / Mayús+Z | Zoom de la línea de tiempo / ajustar |
 | T | Añadir texto |
+| M | Añadir / quitar marcador en el cursor |
 | Ctrl+E | Exportar |
 | Ctrl+Mayús+R | Grabar pantalla |
 | Ctrl+Alt+S / Ctrl+Alt+P | Detener / pausar la grabación |

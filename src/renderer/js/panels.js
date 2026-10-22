@@ -5,8 +5,9 @@ import * as edit from './edit.js';
 import { makeDraggable } from './dnd.js';
 import { h, btn, segmented, contextMenu, confirmDialog, toast, fmtBytes, clear } from './ui.js';
 import { icon } from './icons.js';
-import { formatDurationShort, defaultAdjust, defaultText } from '../shared/model.js';
-import { TRANSITIONS, FILTER_PRESETS } from '../shared/effects.js';
+import { formatDurationShort, defaultAdjust, defaultText, isVisual } from '../shared/model.js';
+import { TRANSITIONS, FILTER_PRESETS, EFFECTS } from '../shared/effects.js';
+import * as tools from './tools.js';
 import { TEXT_PRESETS, STICKERS, renderTextCanvas, ensureFont } from './text-render.js';
 import { cssFilterFor } from './render.js';
 
@@ -16,6 +17,7 @@ const TABS = [
   { id: 'text', label: 'Texto', icon: 'text' },
   { id: 'stickers', label: 'Stickers', icon: 'smile' },
   { id: 'transitions', label: 'Transic.', icon: 'transition' },
+  { id: 'effects', label: 'Efectos', icon: 'zap' },
   { id: 'filters', label: 'Filtros', icon: 'sparkles' },
   { id: 'assistant', label: 'Asistente', icon: 'chat' },
   { id: 'record', label: 'Grabar', icon: 'record' },
@@ -37,8 +39,11 @@ export class Panels {
     }
     store.on('media', () => this.tab === 'media' || this.tab === 'audio' ? this.scheduleRender() : null);
     store.on('load', () => this.render());
-    store.on('change', () => this.tab === 'media' && this.updateUsage());
-    store.on('selection', () => this.tab === 'filters' && this.scheduleRender());
+    store.on('change', (d) => {
+      if (this.tab === 'media') this.updateUsage();
+      if (this.tab === 'effects' && d?.kind !== 'live') this.scheduleRender();
+    });
+    store.on('selection', () => (this.tab === 'filters' || this.tab === 'effects') && this.scheduleRender());
     media.addEventListener('change', (e) => this.onMediaChange(e.detail?.id));
     window.addEventListener('litecut:fonts', () => this.tab === 'text' && this.scheduleRender());
     // Mientras la IA trabaja, la pestaña del asistente lo indica aunque se esté en otro panel.
@@ -69,6 +74,7 @@ export class Panels {
       text: () => this.textPanel(),
       stickers: () => this.stickerPanel(),
       transitions: () => this.transitionPanel(),
+      effects: () => this.effectsPanel(),
       filters: () => this.filterPanel(),
       assistant: () => this.assistantPanel(),
       record: () => this.recordPanel(),
@@ -283,6 +289,43 @@ export class Panels {
       grid.append(b);
     }
     wrap.append(grid, h('p', { class: 'hint' }, 'Arrastra una transición a la unión de dos clips de la pista principal, o haz clic para aplicarla en la unión más cercana al cursor. También puedes pulsar el botón «+» entre dos clips.'));
+    return wrap;
+  }
+
+  // ---------- Efectos y herramientas ----------
+  effectsPanel() {
+    const wrap = h('div', { class: 'pnl' });
+    wrap.append(this.head('Efectos'));
+    const sel = store.selectedClips.filter(isVisual);
+    const grid = h('div', { class: 'trans-grid big' });
+    for (const fx of EFFECTS) {
+      const on = sel.length > 0 && sel.every((c) => tools.effectOf(c, fx.id));
+      const b = h('button', { class: `trans-item${on ? ' on' : ''}`, type: 'button', title: fx.hint }, h('span', { class: `tr-prev fx-prev fx-${fx.id}` }, h('i')), h('span', {}, fx.name));
+      b.addEventListener('click', () => tools.toggleEffect(fx.id));
+      grid.append(b);
+    }
+    wrap.append(
+      grid,
+      h('p', { class: 'hint' }, sel.length ? 'Clic para poner o quitar el efecto en los clips seleccionados. La intensidad se ajusta a la derecha, en Animación.' : 'Selecciona uno o más clips de video, imagen o texto y haz clic en un efecto.')
+    );
+    const c = store.singleSelected;
+    const m = c?.mediaId ? store.getMedia(c.mediaId) : null;
+    const sound = !!(m?.hasAudio && !c.muted);
+    const av = c?.type === 'video' || c?.type === 'audio';
+    const tool = (label, ic, enabled, onClick, title) => btn(label, { kind: 'small', icon: ic, onClick, title, disabled: !enabled });
+    wrap.append(
+      h('div', { class: 'panel-sub' }, 'Herramientas'),
+      h(
+        'div',
+        { class: 'tool-list' },
+        tool('Detectar ritmo', 'beat', sound, () => tools.detectBeats(c.id), 'Pone marcadores en los golpes de la música del clip; el imán se pega a ellos'),
+        tool('Quitar silencios', 'wave', sound, () => tools.removeSilences([c.id]), 'Corta las pausas de un clip con voz'),
+        tool('Normalizar volumen', 'volume', sound, () => tools.normalizeVolume([c.id]), 'Deja el volumen como en YouTube o TikTok (−14 LUFS)'),
+        tool('Dividir por escenas', 'scissors', c?.type === 'video', () => tools.splitAtScenes(c.id), 'Corta el clip en cada cambio de plano'),
+        tool(m?.reversedFrom ? 'Hacia delante' : 'Invertir', 'reverse', av, () => tools.reverseClip(c.id), 'Reproduce el clip hacia atrás')
+      ),
+      h('p', { class: 'hint' }, c ? 'También están en el menú del clip (clic derecho). M pone un marcador en el cursor.' : 'Selecciona un clip para usar las herramientas. M pone un marcador en el cursor.')
+    );
     return wrap;
   }
 

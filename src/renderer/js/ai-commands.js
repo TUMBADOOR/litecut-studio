@@ -12,6 +12,7 @@ import { FILTER_PRESETS, ADJUST_FIELDS } from '../shared/effects.js';
 import { TEXT_PRESETS, renderTextCanvas, ensureFont } from './text-render.js';
 import { FORMATS, renderTextAssets } from './export-dialog.js';
 import { h, btn, toast } from './ui.js';
+import * as tools from './tools.js';
 
 const api = window.api;
 let ctx = null; // { player, timeline, beforeEdit(), onActivity(info), onSaved() }
@@ -135,6 +136,7 @@ function describeClip(p, c) {
   if (c.linkedTo) o.audio_de = c.linkedTo;
   if (c.animIn?.type && c.animIn.type !== 'none') o.animacion_entrada = c.animIn.type;
   if (c.animOut?.type && c.animOut.type !== 'none') o.animacion_salida = c.animOut.type;
+  if (c.effects?.length) o.efectos = c.effects.map((e) => ({ efecto: e.type, intensidad: r3(e.intensity) }));
   const t = c.transform;
   if (t && (t.x || t.y || t.scale !== 1 || t.rotation || t.opacity !== 1)) o.transformacion = { x: r3(t.x), y: r3(t.y), escala: r3(t.scale), rotacion: r3(t.rotation), opacidad: r3(t.opacity) };
   return o;
@@ -272,6 +274,8 @@ const handlers = {
       }),
       clips: orderedClips(p).map((c) => describeClip(p, c)),
       medios: p.media.map(describeMedia),
+      marcadores: (p.markers || []).filter((m) => m.kind === 'user').map((m) => r3(m.t)),
+      pulsos_de_ritmo: (p.markers || []).filter((m) => m.kind === 'beat').length,
       seleccion: [...store.selection],
       puede_deshacer: store.canUndo,
       puede_rehacer: store.canRedo,
@@ -844,6 +848,45 @@ const handlers = {
       content.push({ type: 'text', text: `#${i + 1}: ${label}` }, { type: 'image', data: f.data, mimeType: f.mimeType });
     });
     return { content };
+  },
+
+  async detectar_ritmo({ clip }) {
+    needEditable(clip);
+    prepareEdit();
+    const r = await tools.beatMarkers(clip);
+    return result(`Ritmo de ${r.bpm} BPM: ${r.times.length} marcadores de pulso en la línea de tiempo (el imán se pega a ellos).`, { bpm: r.bpm, pulsos: r.times.map(r3) });
+  },
+
+  aplicar_efecto({ clips, efecto, intensidad = 0.5, quitar = false }) {
+    clips.forEach(needEditable);
+    prepareEdit();
+    const r = tools.setEffect(clips, efecto, { intensity: intensidad, remove: quitar });
+    if (quitar) return result(`Efecto ${efecto} quitado de ${r.count} clip(s).`);
+    const beat = efecto === 'zoom-pulse' ? (r.synced ? ', siguiendo los marcadores de ritmo' : ', cada 0,5 s (no hay marcadores de ritmo en esos tramos: usa antes detectar_ritmo)') : '';
+    return result(`Efecto ${efecto} aplicado a ${r.count} clip(s)${beat}.`);
+  },
+
+  async invertir_clip({ clip }) {
+    needEditable(clip);
+    prepareEdit();
+    const r = await tools.reverseCore(clip);
+    return result(r.restored ? 'El clip vuelve a reproducirse hacia delante.' : 'Clip invertido: ahora se reproduce hacia atrás.', { clip: describeClip(store.project, store.getClip(clip)) });
+  },
+
+  async normalizar_volumen({ clips }) {
+    clips.forEach(needClip);
+    prepareEdit();
+    const vols = await tools.normalizeClips(clips);
+    if (!vols.size) return result('Esos clips están en silencio: no se cambió nada.');
+    return result(`Volumen ajustado a −14 LUFS en ${vols.size} clip(s).`, { volumenes: Object.fromEntries([...vols].map(([id, v]) => [id, v])) });
+  },
+
+  async dividir_por_escenas({ clip }) {
+    needEditable(clip);
+    prepareEdit();
+    const ids = await tools.sceneSplit(clip);
+    show(ids);
+    return result(ids.length > 1 ? `Clip dividido en ${ids.length} escenas.` : 'No se encontraron cambios de escena: el clip no se dividió.', { clips: ids });
   },
 
   async guardar_proyecto({ ruta }) {

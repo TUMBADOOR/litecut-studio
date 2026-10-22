@@ -30,10 +30,10 @@ export class Store extends EventTarget {
     this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
-  // El historial guarda la línea de tiempo y ajustes (no la biblioteca de medios).
+  // El historial guarda la línea de tiempo, los marcadores y los ajustes (no la biblioteca de medios).
   snapshot() {
     const p = this.project;
-    return JSON.stringify({ name: p.name, settings: p.settings, tracks: p.tracks, clips: p.clips });
+    return JSON.stringify({ name: p.name, settings: p.settings, tracks: p.tracks, clips: p.clips, markers: p.markers || [] });
   }
 
   applySnapshot(s) {
@@ -42,6 +42,7 @@ export class Store extends EventTarget {
     this.project.settings = d.settings;
     this.project.tracks = d.tracks;
     this.project.clips = d.clips;
+    this.project.markers = d.markers || [];
   }
 
   changed(kind = 'edit') {
@@ -240,7 +241,7 @@ export class Store extends EventTarget {
         version: p.version,
         name: p.name,
         settings: p.settings,
-        media: p.media.map(({ id, path, name, kind, duration, width, height, hasAudio, hasVideo, fps, size, start, container, vcodec, acodec, proxyPath }) => ({
+        media: p.media.map(({ id, path, name, kind, duration, width, height, hasAudio, hasVideo, fps, size, start, container, vcodec, acodec, proxyPath, proxyParts, reversedFrom }) => ({
           id,
           path,
           name,
@@ -257,9 +258,12 @@ export class Store extends EventTarget {
           vcodec,
           acodec,
           proxyPath,
+          ...(proxyParts?.length ? { proxyParts } : {}),
+          ...(reversedFrom ? { reversedFrom } : {}),
         })),
         tracks: p.tracks,
         clips: p.clips,
+        markers: p.markers || [],
       },
       null,
       1

@@ -1,7 +1,7 @@
 // Compositor de la vista previa: dibuja el proyecto en un instante dado sobre un canvas 2D.
 // Usa la misma geometría, color y movimiento que la exportación (módulos compartidos).
-import { mainTrack } from '../shared/model.js';
-import { colorPipeline, colorKey, svgMatrixValues, vignetteAlpha, evalMotion, clipMotion, roundedRadius, BG_BLUR, bgBlurSigma } from '../shared/effects.js';
+import { mainTrack, isVisual } from '../shared/model.js';
+import { colorPipeline, colorKey, svgMatrixValues, vignetteAlpha, evalMotion, clipMotion, roundedRadius, BG_BLUR, bgBlurSigma, flashAlpha } from '../shared/effects.js';
 import { cropRect, mainTrackItems, mainFramesAt, overlayClipsAt } from '../shared/layout.js';
 import { cachedTextCanvas } from './text-render.js';
 
@@ -138,6 +138,14 @@ export function drawFrame(ctx, t, env) {
     for (const fr of frames) drawMainFrame(ctx, fr, t, env, cw, ch);
   }
   for (const clip of overlayClipsAt(p, t)) drawLayer(ctx, clip, t - clip.start, env, cw, ch);
+  // Efecto «Destello»: fogonazo blanco por encima de todo (igual que en la exportación).
+  for (const clip of p.clips) {
+    const a = flashAlpha(clip, t - clip.start);
+    if (a <= 0.001 || !isVisual(clip) || p.tracks.find((tr) => tr.id === clip.trackId)?.hidden) continue;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cw, ch);
+  }
   ctx.restore();
 }
 

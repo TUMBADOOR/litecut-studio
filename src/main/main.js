@@ -13,6 +13,9 @@ import {
   probe,
   extractThumbs,
   extractPeaks,
+  extractPcm,
+  measureLoudness,
+  reverseRange,
   makeProxy,
   extractFrame,
   detectHardwareEncoders,
@@ -22,6 +25,7 @@ import {
   lastLines,
 } from './ffmpeg.js';
 import { buildExportGraphAuto } from '../shared/export-graph.js';
+import { analyzeBeats } from '../shared/beats.js';
 import { buildMenu } from './menu.js';
 import { Storage, JobQueue, writeFileAtomic } from './storage.js';
 import { RecorderController } from './recorder.js';
@@ -518,14 +522,53 @@ function registerIpc() {
       return { perSec: 50, data: new Uint8Array(0) };
     }
   });
-  ipcMain.handle('media:proxy', async (_e, { id, file, kind, duration, hasAudio }) => {
+  // start/end: solo ese tramo del archivo. cachedOnly: solo responde si ya existe (no convierte nada).
+  ipcMain.handle('media:proxy', async (_e, { id, file, kind, duration, hasAudio, start = 0, end = 0, cachedOnly = false }) => {
     try {
       const ext = kind === 'audio' ? '.m4a' : kind === 'image' ? '.png' : '.mp4';
-      const out = path.join(cacheDir, 'proxies', `${cacheKey(file)}${ext}`);
+      const part = end > start ? `_${Math.round(start * 1000)}-${Math.round(end * 1000)}` : '';
+      const out = path.join(cacheDir, 'proxies', `${cacheKey(file)}${part}${ext}`);
       if (fs.existsSync(out)) return { ok: true, path: out };
+      if (cachedOnly) return { ok: false, missing: true };
+      const length = part ? end - start : 0;
       await proxyJobs.run(() =>
-        makeProxy(file, out, { kind, duration, hasAudio, onProgress: (p) => send('media:proxy-progress', { id, progress: p }) })
+        makeProxy(file, out, { kind, duration, hasAudio, start, length, onProgress: (p) => send('media:proxy-progress', { id, progress: p }) })
       );
+      return { ok: true, path: out };
+    } catch (err) {
+      return { ok: false, error: errInfo(err) };
+    }
+  });
+  // Pulsos de la música en un tramo del archivo (para poner marcadores al ritmo).
+  ipcMain.handle('media:beats', async (_e, { file, start = 0, duration = 0 }) => {
+    try {
+      const rate = 8000;
+      const pcm = await fastJobs.run(() => extractPcm(file, { start, duration, rate }));
+      const r = analyzeBeats(pcm, rate);
+      return { ok: true, bpm: r.bpm, beats: r.beats.map((t) => t + start) };
+    } catch (err) {
+      return { ok: false, error: errInfo(err) };
+    }
+  });
+  ipcMain.handle('media:loudness', async (_e, { file, start = 0, duration = 0 }) => {
+    try {
+      return { ok: true, ...(await fastJobs.run(() => measureLoudness(file, { start, duration }))) };
+    } catch (err) {
+      return { ok: false, error: errInfo(err) };
+    }
+  });
+  // Clip invertido: se guarda junto a las grabaciones (Videos/LiteCut Studio/Invertidos) porque pasa a ser
+  // un archivo del proyecto.
+  ipcMain.handle('media:reverse', async (_e, { id, file, name, start, duration, width, height, fps, hasVideo, hasAudio }) => {
+    try {
+      const dir = path.join(recordingsDir, 'Invertidos');
+      const base = sanitizeName(`${String(name || 'Clip').replace(/\.[^.]+$/, '')} (invertido ${start.toFixed(2)}-${(start + duration).toFixed(2)} s)`);
+      const out = path.join(dir, `${base}.mp4`);
+      if (!fs.existsSync(out)) {
+        await proxyJobs.run(() =>
+          reverseRange(file, out, { start, duration, width, height, fps, hasVideo, hasAudio, onProgress: (p) => send('media:reverse-progress', { id, progress: p }) })
+        );
+      }
       return { ok: true, path: out };
     } catch (err) {
       return { ok: false, error: errInfo(err) };

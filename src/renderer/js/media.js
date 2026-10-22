@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { uid, mediaKindFromPath, baseName } from '../shared/model.js';
 import { toast } from './ui.js';
 import { heavyReason } from './device.js';
+import { usedRanges, uncoveredRanges, addPart } from '../shared/proxy-ranges.js';
 
 const api = window.api;
 export const mediaUrl = (p) => api.mediaUrl(p);
@@ -19,14 +20,31 @@ class MediaManager extends EventTarget {
     this.bitmaps = new Map();
     this.status = new Map();
     this.optimizing = new Set();
+    this.again = new Set();
+    this.heavy = new Map(); // id → motivo: videos demasiado pesados para este equipo
     this.prefs = { autoOptimize: localStorage.getItem('litecut.autoOptimize') !== '0' };
     api.media.onProxyProgress(({ id, progress }) => this.setStatus(id, this.optimizing.has(id) ? { progress } : { state: 'proxy', progress }));
+    // Las partes de un video pesado que se van usando al editar se convierten enseguida.
+    let timer = null;
+    store.on('change', (d) => {
+      if (!this.heavy.size || d?.kind === 'live' || d?.kind === 'media') return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        for (const id of this.heavy.keys()) {
+          const m = store.getMedia(id);
+          if (m) this.optimizeUsed(m);
+        }
+      }, 1200);
+    });
+    store.on('load', () => this.heavy.clear());
   }
 
   setAutoOptimize(on) {
     this.prefs.autoOptimize = !!on;
     localStorage.setItem('litecut.autoOptimize', on ? '1' : '0');
-    if (on) for (const m of store.project.media) if (m.kind === 'video' && !m.proxyPath && this.getStatus(m.id).state === 'ready') this.maybeOptimize(m);
+    if (on) for (const m of store.project.media) if (m.kind === 'video' && this.getStatus(m.id).state === 'ready') this.maybeOptimize(m);
+    store.version++;
+    store.emit('change', { kind: 'media' }); // la vista previa vuelve a elegir copia u original
   }
 
   emitChange(id) {
@@ -44,6 +62,15 @@ class MediaManager extends EventTarget {
 
   previewPath(m) {
     return m.proxyPath || m.path;
+  }
+
+  // Archivo con el que la vista previa muestra el tramo [a, b] del original (en segundos): la copia ligera completa,
+  // una parte de copia ligera que lo cubra entero o el original. offset: dónde empieza ese archivo dentro del original.
+  previewFor(m, a = 0, b = Infinity) {
+    if (m.proxyPath) return { path: m.proxyPath, offset: 0, end: m.duration };
+    const parts = this.prefs.autoOptimize ? m.proxyParts || [] : [];
+    const part = parts.find((p) => p.start <= a + 0.05 && p.end >= Math.min(b, m.duration || b) - 0.05);
+    return part ? { path: part.path, offset: part.start, end: part.end } : { path: m.path, offset: 0, end: m.duration };
   }
 
   // errors (opcional): lista donde se anotan { path, message } de los archivos que no se pudieron importar.
@@ -117,32 +144,67 @@ class MediaManager extends EventTarget {
   }
 
   // Videos que este equipo no reproduce con soltura (p. ej. AV1 sin decodificación por hardware o 4K en un
-  // equipo modesto): mientras se sigue editando con el original, se crea en segundo plano una copia ligera
-  // (720p H.264) solo para la vista previa. La exportación siempre usa el archivo original.
+  // equipo modesto): se editan con copias ligeras (720p H.264) solo de las partes que usa el proyecto, que se
+  // crean en segundo plano en segundos. Mientras tanto se ve el original. La exportación siempre usa el original.
   async maybeOptimize(m) {
-    if (!this.prefs.autoOptimize || m.proxyPath || this.optimizing.has(m.id)) return;
+    if (!this.prefs.autoOptimize || m.proxyPath || this.heavy.has(m.id)) return;
     const reason = await heavyReason(m).catch(() => null);
-    if (!reason || this.optimizing.has(m.id)) return;
+    if (!reason || this.heavy.has(m.id)) return;
+    this.heavy.set(m.id, reason);
+    // Una copia ligera completa hecha antes (LiteCut 1.0.1) sirve tal cual.
+    const full = await api.media.proxy({ id: m.id, file: m.path, kind: 'video', cachedOnly: true });
+    const cur = store.getMedia(m.id);
+    if (!cur) return;
+    if (full.ok && !cur.proxyPath) store.updateMedia(m.id, { proxyPath: full.path });
+    else this.optimizeUsed(cur);
+  }
+
+  // Tramos del original que usa el proyecto y que aún no tienen copia ligera.
+  missingParts(m) {
+    return uncoveredRanges(usedRanges(store.project.clips, m.id, m.duration), m.proxyParts || []);
+  }
+
+  // Crea, de una en una, las partes que faltan. Si el proyecto cambia mientras tanto, vuelve a mirar al terminar.
+  async optimizeUsed(m) {
+    if (!this.prefs.autoOptimize || m.proxyPath) return;
+    if (this.optimizing.has(m.id)) {
+      this.again.add(m.id);
+      return;
+    }
+    let todo = this.missingParts(m);
+    if (!todo.length) return;
     this.optimizing.add(m.id);
     this.setStatus(m.id, { optimizing: true, progress: 0 });
     if (!this.optimizeHinted) {
       this.optimizeHinted = true;
-      toast(`«${m.name}» (${reason}) es pesado para este equipo: se está creando una copia ligera para editar con fluidez. Al exportar se usa el original.`, { timeout: 9000 });
+      const msg = `«${m.name}» (${this.heavy.get(m.id)}) es pesado para este equipo: LiteCut crea copias ligeras de las partes que usas para editar con fluidez. Al exportar se usa el original.`;
+      toast(msg, { timeout: 9000 });
     }
     try {
-      const r = await api.media.proxy({ id: m.id, file: m.path, kind: 'video', duration: m.duration, hasAudio: m.hasAudio });
-      const cur = store.getMedia(m.id);
-      if (r.ok && cur && cur.path === m.path && !cur.proxyPath) store.updateMedia(m.id, { proxyPath: r.path });
+      while (todo.length) {
+        const [a, b] = todo[0];
+        const r = await api.media.proxy({ id: m.id, file: m.path, kind: 'video', duration: m.duration, hasAudio: m.hasAudio, start: a, end: b });
+        const cur = store.getMedia(m.id);
+        if (!r.ok || !cur || cur.path !== m.path || cur.proxyPath) break; // si falla, se sigue con el original
+        store.updateMedia(m.id, { proxyParts: addPart(cur.proxyParts || [], { start: a, end: b, path: r.path }) });
+        this.setStatus(m.id, { progress: 0 });
+        todo = this.missingParts(cur);
+      }
     } finally {
       this.optimizing.delete(m.id);
       this.setStatus(m.id, { optimizing: false });
+      if (this.again.delete(m.id)) {
+        const cur = store.getMedia(m.id);
+        if (cur) this.optimizeUsed(cur);
+      }
     }
   }
 
   async prepare(m) {
     this.setStatus(m.id, { state: 'checking', error: null });
     try {
-      const exists = await api.fs.exists([m.path, m.proxyPath]);
+      const parts = m.proxyParts || [];
+      const exists = await api.fs.exists([m.path, m.proxyPath, ...parts.map((p) => p.path)]);
       if (!exists[0]) {
         store.updateMedia(m.id, { missing: true });
         this.setStatus(m.id, { state: 'missing' });
@@ -150,6 +212,7 @@ class MediaManager extends EventTarget {
       }
       if (m.missing) store.updateMedia(m.id, { missing: false });
       if (m.proxyPath && !exists[1]) store.updateMedia(m.id, { proxyPath: null });
+      if (parts.some((_, i) => !exists[2 + i])) store.updateMedia(m.id, { proxyParts: parts.filter((_, i) => exists[2 + i]) });
       if (!m.proxyPath) {
         const playable = !this.needsProxyByCodec(m) && (await this.canPlay(m));
         if (!playable) {
@@ -318,6 +381,7 @@ class MediaManager extends EventTarget {
     this.bitmaps.get(mediaId)?.bitmap?.close();
     this.bitmaps.delete(mediaId);
     this.status.delete(mediaId);
+    this.heavy.delete(mediaId);
   }
 
   // Volver a enlazar un archivo movido o renombrado.
@@ -333,6 +397,7 @@ class MediaManager extends EventTarget {
       name: baseName(newPath),
       missing: false,
       proxyPath: null,
+      proxyParts: null,
       duration: m.kind === 'image' ? 0 : r.info.duration,
       width: r.info.width || m.width,
       height: r.info.height || m.height,

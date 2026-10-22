@@ -8,6 +8,7 @@ import { icon } from './icons.js';
 import { clipEnd, mainTrack, trackLabel, MIN_CLIP, formatTime, snapToFrame, isVisual, trackClips, projectDuration } from '../shared/model.js';
 import { TRANSITIONS } from '../shared/effects.js';
 import * as ops from '../shared/ops.js';
+import * as tools from './tools.js';
 
 const RULER_H = 26;
 const ZONE_H = 14;
@@ -95,6 +96,7 @@ export class Timeline {
         iconBtn('gap', 'Cerrar huecos de la pista principal', () => edit.closeGapsMain())
       ),
       h('div', { class: 'vsep' }),
+      iconBtn('flag', 'Añadir o quitar un marcador en el cursor (M)', () => tools.toggleMarkerAtPlayhead()),
       this.snapBtn,
       h('div', { class: 'spacer' }),
       this.selInfo,
@@ -144,6 +146,7 @@ export class Timeline {
       this.scroll.scrollTop += e.deltaY;
     }, { passive: true });
     this.ruler.addEventListener('pointerdown', (e) => this.onRulerDown(e));
+    this.ruler.addEventListener('contextmenu', (e) => this.onRulerMenu(e));
     this.phCap.addEventListener('pointerdown', (e) => this.onRulerDown(e));
     this.lanes.addEventListener('pointerdown', (e) => this.onLanesDown(e));
     this.lanes.addEventListener('contextmenu', (e) => this.onContextMenu(e));
@@ -489,6 +492,47 @@ export class Timeline {
     }
     ctx.fillStyle = '#2a2a33';
     ctx.fillRect(0, RULER_H - 1, vw, 1);
+    // Marcadores: los del usuario, banderitas amarillas; los del ritmo, rayitas turquesa.
+    for (const mk of store.project.markers || []) {
+      const x = Math.round(mk.t * pps - x0) + 0.5;
+      if (x < -6 || x > vw + 6) continue;
+      if (mk.kind === 'beat') {
+        ctx.fillStyle = 'rgba(25, 211, 197, 0.9)';
+        ctx.fillRect(x - 0.5, RULER_H - 10, 2, 10);
+      } else {
+        ctx.fillStyle = '#ffc53d';
+        ctx.beginPath();
+        ctx.moveTo(x - 5, 1);
+        ctx.lineTo(x + 5, 1);
+        ctx.lineTo(x + 5, 8);
+        ctx.lineTo(x, 13);
+        ctx.lineTo(x - 5, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillRect(x - 0.5, 13, 1, RULER_H - 13);
+      }
+    }
+  }
+
+  onRulerMenu(e) {
+    e.preventDefault();
+    const t = Math.max(0, this.timeAt(e.clientX));
+    const tol = 6 / this.pps;
+    const markers = store.project.markers || [];
+    const near = markers.filter((m) => Math.abs(m.t - t) <= tol).sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t))[0];
+    contextMenu(e.clientX, e.clientY, [
+      {
+        label: 'Añadir marcador aquí',
+        icon: 'flag',
+        shortcut: 'M',
+        onClick: () => {
+          this.player.seek(snapToFrame(t, fps()));
+          tools.toggleMarkerAtPlayhead();
+        },
+      },
+      near ? { label: near.kind === 'beat' ? 'Quitar este marcador de ritmo' : 'Quitar este marcador', icon: 'trash', onClick: () => tools.deleteMarker(near.id) } : null,
+      markers.some((m) => m.kind === 'beat') ? { label: 'Quitar todos los marcadores de ritmo', icon: 'trash', danger: true, onClick: () => tools.clearBeats() } : null,
+    ]);
   }
 
   // ---------- Zoom ----------
@@ -559,6 +603,7 @@ export class Timeline {
       if (excludeIds && excludeIds.has(c.id)) continue;
       out.push(c.start, clipEnd(c));
     }
+    for (const mk of store.project.markers || []) out.push(mk.t);
     return out;
   }
 
@@ -926,6 +971,13 @@ export class Timeline {
           : { label: 'Separar audio', icon: 'detach', onClick: () => edit.detachAudioSelected() }
         : null,
       clip.type === 'video' ? { label: 'Congelar fotograma', icon: 'freeze', onClick: () => edit.freezeFrameSelected() } : null,
+      clip.type === 'video' || clip.type === 'audio'
+        ? { label: m?.reversedFrom ? 'Reproducir hacia delante otra vez' : 'Invertir (hacia atrás)', icon: 'reverse', onClick: () => tools.reverseClip(clip.id) }
+        : null,
+      clip.type === 'video' ? { label: 'Dividir en cada cambio de escena', icon: 'scissors', onClick: () => tools.splitAtScenes(clip.id) } : null,
+      m?.hasAudio && !clip.muted ? { label: 'Detectar ritmo (marcadores)', icon: 'beat', onClick: () => tools.detectBeats(clip.id) } : null,
+      m?.hasAudio && !clip.muted ? { label: 'Quitar silencios', icon: 'wave', onClick: () => tools.removeSilences() } : null,
+      m?.hasAudio && !clip.muted ? { label: 'Normalizar volumen', icon: 'volume', onClick: () => tools.normalizeVolume() } : null,
       hasPrev
         ? clip.transitionIn
           ? { label: 'Quitar transición de entrada', icon: 'transition', onClick: () => edit.removeTransition(clip.id) }

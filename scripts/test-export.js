@@ -4,7 +4,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runFfmpeg, probe, ffmpegVersion, filterScriptArgs, encoderArgs, lastLines, listKeyframes, extractThumbs } from '../src/main/ffmpeg.js';
+import { runFfmpeg, probe, ffmpegVersion, filterScriptArgs, encoderArgs, lastLines, listKeyframes, extractThumbs, reverseRange, measureLoudness, extractPcm } from '../src/main/ffmpeg.js';
+import { analyzeBeats } from '../src/shared/beats.js';
 import { buildExportGraph } from '../src/shared/export-graph.js';
 import { createProject, createClip, createTrack } from '../src/shared/model.js';
 import { TRANSITIONS, FILTER_PRESETS } from '../src/shared/effects.js';
@@ -221,6 +222,55 @@ if (!quick) {
   const okTs = tsKeys.length > 0 && Math.abs(tsKeys[0]) < 0.1 && tsList.length > 0 && tsList[0].t < 0.1;
   console.log(`  ${okTs ? '✓' : '✗'} MPEG-TS: primer fotograma clave en ${tsKeys[0]?.toFixed(2)} s, ${tsList.length} miniaturas`);
   check(okTs);
+}
+
+// ---------- Efectos, invertir, volumen y ritmo ----------
+{
+  console.log('Efectos y herramientas:');
+  const p = baseProject();
+  const V1 = p.tracks[0];
+  const V2 = createTrack('video');
+  p.tracks.unshift(V2);
+  const c1 = createClip('video', { trackId: V1.id, mediaId: 'm1', start: 0, duration: 3, effects: [{ type: 'shake', intensity: 0.6 }, { type: 'flash', intensity: 0.8 }] });
+  const c2 = createClip('image', { trackId: V1.id, mediaId: 'mi', start: 3, duration: 2, effects: [{ type: 'zoom-hit', intensity: 1 }, { type: 'zoom-pulse', intensity: 0.7, period: 0.5, phase: 0 }] });
+  const c3 = createClip('image', { trackId: V2.id, mediaId: 'mi', start: 1, duration: 2, effects: [{ type: 'impact', intensity: 0.8 }, { type: 'flash', intensity: 0.5 }] });
+  c3.transform.scale = 0.4;
+  p.clips = [c1, c2, c3];
+  check(await exportProject(p, 'efectos', { width: 640, height: 360 }));
+  check(await exportProject(p, 'efectos-movie', { width: 640, height: 360, movie: true }));
+
+  // Invertir: dura lo mismo y su primer fotograma es el último del tramo original.
+  const rev = path.join(dir, 'invertido.mp4');
+  fs.rmSync(rev, { force: true });
+  await reverseRange(files.v1, rev, { start: 1, duration: 2, width: 1280, height: 720, fps: 30 });
+  const ri = await probe(rev);
+  const frames = await countFrames(rev);
+  const ssimVs = async (t) => {
+    let line = '';
+    await runFfmpeg(['-hide_banner', '-nostdin', '-i', rev, '-ss', String(t), '-i', files.v1, '-filter_complex', '[0:v]trim=end_frame=1[a];[1:v]trim=end_frame=1[b];[a][b]ssim', '-f', 'null', '-'], {
+      onLine: (l) => (/All:/.test(l) ? (line = l) : null),
+    });
+    return parseFloat(/All:([\d.]+)/.exec(line)?.[1] || '0');
+  };
+  const sEnd = await ssimVs(3 - 1 / 30);
+  const sStart = await ssimVs(1);
+  const okRev = Math.abs(ri.duration - 2) < 0.1 && Math.abs(frames - 60) <= 2 && ri.hasAudio && sEnd > 0.95 && sEnd > sStart + 0.02;
+  console.log(`  ${okRev ? '✓' : '✗'} invertir: ${ri.duration.toFixed(2)} s, ${frames} fotogramas; 1.º invertido ≈ último original (SSIM ${sEnd.toFixed(3)} frente a ${sStart.toFixed(3)})`);
+  check(okRev);
+
+  // Volumen: el seno de prueba tiene una sonoridad medible.
+  const loud = await measureLoudness(files.music, { start: 1, duration: 4 });
+  const okLoud = Number.isFinite(loud.lufs) && loud.lufs < 0 && loud.lufs > -40 && loud.peak <= 0.5;
+  console.log(`  ${okLoud ? '✓' : '✗'} volumen: ${loud.lufs.toFixed(1)} LUFS, pico ${loud.peak.toFixed(1)} dBFS`);
+  check(okLoud);
+
+  // Ritmo desde un archivo: golpes cada 0,5 s (120 BPM).
+  const clicks = await gen('clics120.wav', ['-f', 'lavfi', '-i', "aevalsrc='0.8*sin(2*PI*900*t)*exp(-40*mod(t\\,0.5))':s=44100:d=12"]);
+  const pcm = await extractPcm(clicks, { start: 2, duration: 8, rate: 8000 });
+  const beats = analyzeBeats(pcm, 8000);
+  const okBeats = Math.abs(beats.bpm - 120) < 2 && beats.beats.length >= 14 && beats.beats.every((b) => Math.abs(((b + 2) % 0.5) - 0) < 0.03 || Math.abs(((b + 2) % 0.5) - 0.5) < 0.03);
+  console.log(`  ${okBeats ? '✓' : '✗'} ritmo desde archivo: ${beats.bpm} BPM, ${beats.beats.length} pulsos (${beats.beats.slice(0, 4).map((b) => (b + 2).toFixed(2)).join(' ')}…)`);
+  check(okBeats);
 }
 
 console.log(failures ? `\n${failures} prueba(s) fallaron` : '\nTodas las pruebas pasaron');

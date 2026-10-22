@@ -20,6 +20,8 @@ import {
   motionIsStatic,
   BG_BLUR,
   bgBlurSigma,
+  flashAlpha,
+  FLASH_DURATION,
   fmtNum as n5,
 } from './effects.js';
 import { cropRect, hasCrop, mainTrackItems } from './layout.js';
@@ -506,6 +508,22 @@ export function buildExportGraph(project, opts, assets = {}) {
         chains.push(`[${cur}][${sh}]overlay=x=${p.x}:y=${p.y}:eof_action=pass[${o}]`);
         cur = o;
       }
+    }
+
+    // Efecto «Destello»: fogonazo blanco por encima de todo al empezar el clip (igual que en la vista previa).
+    for (const clip of project.clips) {
+      if (!isVisual(clip) || tracks.get(clip.trackId)?.hidden) continue;
+      const a0 = flashAlpha(clip, 0);
+      const s = F(clip.start);
+      const nF = Math.min(F(clip.start + FLASH_DURATION), TF) - s;
+      if (a0 <= 0.001 || nF <= 0) continue;
+      const fl = L('fl');
+      chains.push(
+        `color=c=white:s=${W}x${H}:r=${fps}:d=${n5((nF + 1) / fps)},format=rgba,trim=end_frame=${nF},colorchannelmixer=aa=${n5(a0)},fade=t=out:st=0:d=${n5(FLASH_DURATION)}:alpha=1,setpts=PTS+${n5(s / fps)}/TB[${fl}]`
+      );
+      const o = L('v');
+      chains.push(`[${cur}][${fl}]overlay=0:0:eof_action=pass[${o}]`);
+      cur = o;
     }
 
     // Importante: quien ejecute FFmpeg debe pasar "-r fps" a la salida; si no, una imagen

@@ -212,6 +212,77 @@ export const KENBURNS = [
   { id: 'zoom-out', name: 'Alejamiento lento' },
 ];
 
+// Efectos de clip (como los de CapCut para «edits»). intensity va de 0.1 a 1. Un clip puede tener varios.
+export const EFFECTS = [
+  { id: 'shake', name: 'Temblor', hint: 'La imagen tiembla todo el clip' },
+  { id: 'impact', name: 'Impacto', hint: 'Sacudida fuerte al empezar que se calma' },
+  { id: 'zoom-hit', name: 'Golpe de zoom', hint: 'Acercamiento rápido al empezar el clip' },
+  { id: 'zoom-pulse', name: 'Pulso al ritmo', hint: 'Golpes de zoom repetidos (siguen los marcadores de ritmo)' },
+  { id: 'flash', name: 'Destello', hint: 'Fogonazo blanco al empezar el clip' },
+];
+export const FLASH_DURATION = 0.3;
+
+// Ondas de los temblores (peso, Hz, fase): suma de senos que parece aleatoria pero se repite igual al exportar.
+const SHAKE_X = [
+  [0.55, 9.3, 0],
+  [0.3, 14.7, 1.9],
+  [0.15, 23.1, 4.1],
+];
+const SHAKE_Y = [
+  [0.55, 10.7, 2.2],
+  [0.3, 16.3, 0.7],
+  [0.15, 25.9, 5.3],
+];
+
+// Añade al movimiento del clip los efectos que lo mueven o lo escalan (el destello se dibuja aparte).
+function effectMotion(m, clip, D, W, H) {
+  const minWH = Math.min(W, H);
+  for (const fx of clip.effects || []) {
+    const i = clamp01(Number(fx.intensity ?? 0.5)) || 0.5;
+    if (fx.type === 'shake') {
+      const amp = i * 0.035 * minWH;
+      m.dx.push({ kind: 'wave', t0: 0, d: D, amp, waves: SHAKE_X, tau: 0 });
+      m.dy.push({ kind: 'wave', t0: 0, d: D, amp, waves: SHAKE_Y, tau: 0 });
+      // Un poco más grande para que al moverse no se vean los bordes.
+      m.scale.push({ t0: 0, d: D, from: 1 + (2 * amp) / minWH, to: 1 + (2 * amp) / minWH, ease: 'linear' });
+    } else if (fx.type === 'impact') {
+      const amp = i * 0.06 * minWH;
+      const d = Math.min(D, 1);
+      m.dx.push({ kind: 'wave', t0: 0, d, amp, waves: SHAKE_X, tau: 0.15 });
+      m.dy.push({ kind: 'wave', t0: 0, d, amp, waves: SHAKE_Y, tau: 0.15 });
+      m.scale.push({ kind: 'pulse', t0: 0, d, amp: (2 * amp) / minWH, tau: 0.15, period: 0, phase: 0 });
+    } else if (fx.type === 'zoom-hit') {
+      m.scale.push({ kind: 'pulse', t0: 0, d: Math.min(D, 1.2), amp: 0.3 * i, tau: 0.12, period: 0, phase: 0 });
+    } else if (fx.type === 'zoom-pulse') {
+      const period = Number(fx.period) > 0.15 ? Number(fx.period) : 0.5;
+      m.scale.push({ kind: 'pulse', t0: 0, d: D, amp: 0.12 * i, tau: 0.1, period, phase: Number(fx.phase) || 0 });
+    }
+  }
+}
+
+// Opacidad del destello blanco en el tiempo local t del clip (0 si no tiene).
+export function flashAlpha(clip, t) {
+  const fx = (clip.effects || []).find((e) => e.type === 'flash');
+  if (!fx || t < 0 || t >= FLASH_DURATION) return 0;
+  const i = clamp01(Number(fx.intensity ?? 0.5)) || 0.5;
+  return i * (1 - t / FLASH_DURATION);
+}
+
+// Periodo y fase del pulso a partir de los marcadores de ritmo que caen dentro del clip (o null si no hay).
+export function beatGridFor(clip, markers = []) {
+  const end = clip.start + clip.duration;
+  const beats = markers.filter((m) => m.kind === 'beat' && m.t >= clip.start - 1e-3 && m.t <= end + 1e-3).map((m) => m.t);
+  if (beats.length < 3) return null;
+  const gaps = beats
+    .slice(1)
+    .map((b, k) => b - beats[k])
+    .sort((a, b) => a - b);
+  const period = gaps[Math.floor(gaps.length / 2)];
+  if (!(period > 0.15)) return null;
+  const phase = (((beats[0] - clip.start) % period) + period) % period;
+  return { period: Math.round(period * 1000) / 1000, phase: Math.round(phase * 1000) / 1000 };
+}
+
 export const TRANSITIONS = [
   { id: 'fade', name: 'Disolver' },
   { id: 'fadeblack', name: 'Fundido' },
@@ -305,6 +376,7 @@ export function clipMotion(clip, D, W, H) {
   }
   if (clip.kenburns === 'zoom-in') m.scale.push({ t0: 0, d: D, from: 1, to: 1.25, ease: 'linear' });
   if (clip.kenburns === 'zoom-out') m.scale.push({ t0: 0, d: D, from: 1.25, to: 1, ease: 'linear' });
+  effectMotion(m, clip, D, W, H);
   return m;
 }
 
@@ -353,8 +425,28 @@ export function transitionFx(type, d, W, H) {
 }
 
 // ----- Evaluación numérica (vista previa) -----
+// Además de los tramos «de A a B», hay dos tipos para los efectos:
+//   wave:  { t0, d, amp, waves: [[peso, Hz, fase]], tau }  desplazamiento que oscila (se apaga con tau si tau > 0)
+//   pulse: { t0, d, amp, tau, period, phase }             escala 1 + amp·e^(−u/tau); u se reinicia cada period
+
+function waveValue(seg, t) {
+  if (t < seg.t0 || t > seg.t0 + seg.d) return 0;
+  const u = t - seg.t0;
+  let s = 0;
+  for (const [w, f, ph] of seg.waves) s += w * Math.sin(2 * Math.PI * f * u + ph);
+  return seg.amp * (seg.tau > 0 ? Math.exp(-u / seg.tau) : 1) * s;
+}
+
+function pulseValue(seg, t) {
+  if (t < seg.t0 || t > seg.t0 + seg.d) return 1;
+  let u = t - seg.t0;
+  if (seg.period > 0) u = (((u - seg.phase) % seg.period) + seg.period) % seg.period;
+  return 1 + seg.amp * Math.exp(-u / seg.tau);
+}
 
 function segValue(seg, t) {
+  if (seg.kind === 'wave') return waveValue(seg, t);
+  if (seg.kind === 'pulse') return pulseValue(seg, t);
   const p = clamp01((t - seg.t0) / seg.d);
   return seg.from + (seg.to - seg.from) * EASE[seg.ease || 'linear'].js(p);
 }
@@ -380,6 +472,17 @@ export function evalMotion(m, t) {
 // tv: expresión del tiempo local (p. ej. 't' o '(t-12.5)'); k: escala de píxeles proyecto → salida.
 
 function ffSeg(seg, tv, k = 1) {
+  const inside = `between(${tv}\\,${n5(seg.t0)}\\,${n5(seg.t0 + seg.d)})`;
+  const U = `(${tv}-${n5(seg.t0)})`;
+  if (seg.kind === 'wave') {
+    const sum = seg.waves.map(([w, f, ph]) => `${n5(w)}*sin(${n5(2 * Math.PI * f)}*${U}+${n5(ph)})`).join('+');
+    const decay = seg.tau > 0 ? `*exp(-${U}/${n5(seg.tau)})` : '';
+    return `(${n5(seg.amp * k)}*${inside}${decay}*(${sum}))`;
+  }
+  if (seg.kind === 'pulse') {
+    const u = seg.period > 0 ? `mod(${U}-${n5(seg.phase)}+${n5(seg.period * 1000)}\\,${n5(seg.period)})` : U;
+    return `(1+${n5(seg.amp)}*${inside}*exp(-${u}/${n5(seg.tau)}))`;
+  }
   const P = `clip((${tv}-${n5(seg.t0)})/${n5(seg.d)}\\,0\\,1)`;
   const E = EASE[seg.ease || 'linear'].ff(P);
   return `((${n5(seg.from * k)})+(${n5((seg.to - seg.from) * k)})*${E})`;

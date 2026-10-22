@@ -349,14 +349,21 @@ kbd {
 .stab.rec svg {
   color: var(--rec);
 }
-/* Pantallas bajas (portátiles de 768 px): las 8 pestañas caben sin desplazar con la línea de tiempo por defecto. */
+/* Pantallas bajas (portátiles de 768 px): las 9 pestañas caben sin desplazar con la línea de tiempo por defecto. */
 @media (max-height: 860px) {
-  #sidetabs,
-  .stab {
-    gap: 1px;
+  #sidetabs {
+    gap: 0;
+    padding: 4px 0;
   }
   .stab {
-    padding: 4px 2px;
+    gap: 1px;
+    padding: 3px 2px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+  .stab svg {
+    width: 18px;
+    height: 18px;
   }
 }
 
@@ -722,6 +729,57 @@ kbd {
 @keyframes tpCircle { 0%, 20% { clip-path: circle(0% at 50% 50%) } 80%, 100% { clip-path: circle(75% at 50% 50%) } }
 @keyframes tpZoomIn { 0%, 20% { transform: scale(0.5); opacity: 0 } 80%, 100% { transform: scale(1); opacity: 1 } }
 @keyframes tpZoomOut { 0%, 20% { transform: scale(1.4); opacity: 0 } 80%, 100% { transform: scale(1); opacity: 1 } }
+
+/* Efectos (vista previa animada de cada uno) */
+.fx-prev i {
+  background: radial-gradient(circle at 50% 45%, #ffd36b 0 18%, transparent 19%), linear-gradient(135deg, #22d3c5, #3a6cf0);
+}
+.fx-shake i { animation: fxShake 0.35s linear infinite; }
+.fx-impact i { animation: fxImpact 1.6s ease-out infinite; }
+.fx-zoom-hit i { animation: fxZoomHit 1.6s ease-out infinite; }
+.fx-zoom-pulse i { animation: fxZoomPulse 0.6s ease-out infinite; }
+.fx-flash i { animation: none; }
+.fx-flash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  animation: fxFlash 1.6s linear infinite;
+}
+@keyframes fxShake { 0% { transform: translate(0, 0) scale(1.08) } 25% { transform: translate(-3px, 2px) scale(1.08) } 50% { transform: translate(2px, -2px) scale(1.08) } 75% { transform: translate(-2px, -1px) scale(1.08) } 100% { transform: translate(0, 0) scale(1.08) } }
+@keyframes fxImpact { 0% { transform: translate(-5px, 3px) scale(1.12) } 6% { transform: translate(5px, -4px) scale(1.1) } 12% { transform: translate(-4px, 2px) scale(1.08) } 18% { transform: translate(3px, -2px) scale(1.05) } 26% { transform: translate(-1px, 1px) scale(1.02) } 36%, 100% { transform: none } }
+@keyframes fxZoomHit { 0% { transform: scale(1.35) } 25%, 100% { transform: scale(1) } }
+@keyframes fxZoomPulse { 0% { transform: scale(1.15) } 45%, 100% { transform: scale(1) } }
+@keyframes fxFlash { 0% { opacity: 0.95 } 20%, 100% { opacity: 0 } }
+.panel-sub {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tool-list .btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.insp-fx {
+  display: grid;
+  gap: 4px;
+}
+.insp-fx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dim);
+  font-size: 12px;
+}
 
 /* Filtros */
 .filter-grid {

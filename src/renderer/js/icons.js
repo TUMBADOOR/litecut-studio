@@ -67,6 +67,11 @@ const P = {
   chat: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4.5V16h0a2.5 2.5 0 0 1-2-2.5z"/><path d="m12 6.5.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
   send: '<path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5z"/>',
   gap: '<path d="M4 6v12M20 6v12"/><path d="m9 12 3-3 3 3M12 9v9" transform="rotate(90 12 12)"/>',
+  flag: '<path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/>',
+  zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  beat: '<path d="M2 12h3l2-6 3 12 3-9 2 6 2-3h5"/>',
+  reverse: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0"/>',
   logo: '<rect x="2.5" y="4" width="19" height="16" rx="4" fill="currentColor" stroke="none" opacity=".18"/><path d="M10 8.5v7l6-3.5z" fill="currentColor" stroke="none"/>',
 };
 

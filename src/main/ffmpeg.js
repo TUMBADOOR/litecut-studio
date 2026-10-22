@@ -303,6 +303,99 @@ export function extractPeaks(file, { perSec = 50, rate = 8000, signal } = {}) {
   });
 }
 
+// Audio mono en Float32Array (para analizar el ritmo). start/duration en segundos del archivo.
+export async function extractPcm(file, { start = 0, duration = 0, rate = 8000, signal } = {}) {
+  const chunks = [];
+  const range = [...(start > 0 ? ['-ss', start.toFixed(3)] : []), ...(duration > 0 ? ['-t', duration.toFixed(3)] : [])];
+  const r = await runFfmpeg(['-hide_banner', '-nostdin', ...range, '-i', file, '-vn', '-sn', '-ac', '1', '-ar', String(rate), '-f', 'f32le', 'pipe:1'], {
+    signal,
+    priority: BACKGROUND_PRIORITY,
+    onStdout: (d) => chunks.push(d),
+  });
+  const buf = Buffer.concat(chunks);
+  if (!buf.length) {
+    const err = new Error('No se pudo leer el audio');
+    err.details = lastLines(r.stderr);
+    throw err;
+  }
+  return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + (buf.length - (buf.length % 4))));
+}
+
+// Sonoridad integrada (LUFS) y pico verdadero (dBFS) de un tramo, con el medidor EBU R128 de FFmpeg.
+export async function measureLoudness(file, { start = 0, duration = 0, signal } = {}) {
+  const range = [...(start > 0 ? ['-ss', start.toFixed(3)] : []), ...(duration > 0 ? ['-t', duration.toFixed(3)] : [])];
+  const r = await runFfmpeg(['-hide_banner', '-nostdin', ...range, '-i', file, '-map', '0:a:0', '-vn', '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-'], {
+    signal,
+    priority: BACKGROUND_PRIORITY,
+  });
+  const summary = r.stderr.slice(r.stderr.lastIndexOf('Summary:'));
+  const num = (re) => {
+    const m = re.exec(summary);
+    return m ? (m[1] === '-inf' ? -Infinity : parseFloat(m[1])) : null;
+  };
+  const lufs = num(/\bI:\s*(-?[\d.]+|-inf)\s*LUFS/);
+  const peak = num(/Peak:\s*(-?[\d.]+|-inf)\s*dBFS/);
+  if (lufs === null) {
+    const err = new Error('No se pudo medir el volumen');
+    err.details = lastLines(r.stderr);
+    throw err;
+  }
+  return { lufs, peak: peak ?? 0 };
+}
+
+// Invierte un tramo (video y audio). El filtro «reverse» guarda en memoria todos los fotogramas que invierte,
+// así que se trabaja por trozos de ~150 MB y luego se unen en orden inverso (sirve con 4 GB de RAM).
+export async function reverseRange(file, outPath, { start = 0, duration, width = 1920, height = 1080, fps = 30, hasVideo = true, hasAudio = true, onProgress, signal } = {}) {
+  const dir = `${outPath}.trozos`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    const frameBytes = Math.max(1, width * height * 1.5);
+    const maxFrames = Math.max(8, Math.floor((150 * 2 ** 20) / frameBytes));
+    const chunk = hasVideo ? Math.max(0.25, Math.min(3, maxFrames / Math.max(1, fps))) : 20;
+    const n = Math.max(1, Math.ceil(duration / chunk - 1e-6));
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      if (signal?.aborted) throw new Error('Cancelado');
+      const a = start + i * chunk;
+      const d = Math.min(chunk, start + duration - a);
+      // MKV con audio PCM: al unir los trozos no quedan huecos ni chasquidos entre ellos.
+      const out = path.join(dir, `t${String(i).padStart(5, '0')}.mkv`);
+      const args = ['-hide_banner', '-y', '-nostdin', '-ss', a.toFixed(3), '-t', d.toFixed(3), '-i', file];
+      if (hasVideo) args.push('-map', '0:v:0', '-vf', 'reverse,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18');
+      if (hasAudio) args.push('-map', '0:a:0?', '-af', 'areverse', '-c:a', 'pcm_s16le');
+      args.push(out);
+      const r = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY });
+      if (r.code !== 0 || !fs.existsSync(out)) {
+        const err = new Error(r.killed ? 'Cancelado' : 'No se pudo invertir el clip');
+        err.details = lastLines(r.stderr);
+        throw err;
+      }
+      parts.push(out);
+      onProgress?.(((i + 1) / n) * 0.95);
+    }
+    const list = path.join(dir, 'lista.txt');
+    fs.writeFileSync(list, parts.reverse().map((p) => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
+    const tmp = `${outPath}.part.mp4`;
+    const args = ['-hide_banner', '-y', '-nostdin', '-f', 'concat', '-safe', '0', '-i', list];
+    if (hasVideo) args.push('-map', '0:v:0', '-c:v', 'copy');
+    if (hasAudio) args.push('-map', '0:a:0?', '-c:a', 'aac', '-b:a', '192k');
+    args.push('-movflags', '+faststart', tmp);
+    const r = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY });
+    if (r.code !== 0 || !fs.existsSync(tmp)) {
+      fs.rmSync(tmp, { force: true });
+      const err = new Error('No se pudo unir el clip invertido');
+      err.details = lastLines(r.stderr);
+      throw err;
+    }
+    fs.renameSync(tmp, outPath);
+    onProgress?.(1);
+    return outPath;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------- Progreso (-progress pipe:1) ----------
 
 export function progressParser(total, onProgress) {
@@ -331,17 +424,20 @@ export function progressParser(total, onProgress) {
 
 // ---------- Proxy de edición (formatos que el visor no reproduce o videos demasiado pesados para el equipo) ----------
 // 720p H.264 (la gráfica lo decodifica casi en cualquier equipo) con un fotograma clave cada 30: saltar es inmediato.
+// Con start/length se convierte solo ese tramo del archivo (las partes que usa el proyecto): en videos que la CPU
+// decodifica lento (AV1 sin ayuda de la gráfica) es la única forma de tenerlo listo en segundos y no en minutos.
 
-export async function makeProxy(file, outPath, { kind = 'video', duration = 0, hasAudio = true, onProgress, signal } = {}) {
+export async function makeProxy(file, outPath, { kind = 'video', duration = 0, hasAudio = true, onProgress, signal, start = 0, length = 0 } = {}) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   const tmp = `${outPath}.part${path.extname(outPath)}`;
+  const range = length > 0 && kind !== 'image' ? ['-ss', start.toFixed(3), '-t', length.toFixed(3)] : [];
   let args;
   if (kind === 'audio') {
-    args = ['-hide_banner', '-y', '-nostdin', '-i', file, '-vn', '-c:a', 'aac', '-b:a', '160k'];
+    args = ['-hide_banner', '-y', '-nostdin', ...range, '-i', file, '-vn', '-c:a', 'aac', '-b:a', '160k'];
   } else if (kind === 'image') {
     args = ['-hide_banner', '-y', '-nostdin', '-i', file, '-frames:v', '1'];
   } else {
-    args = ['-hide_banner', '-y', '-nostdin', '-i', file, '-map', '0:v:0'];
+    args = ['-hide_banner', '-y', '-nostdin', ...range, '-i', file, '-map', '0:v:0'];
     if (hasAudio) args.push('-map', '0:a:0?');
     args.push(
       '-vf',
@@ -363,7 +459,8 @@ export async function makeProxy(file, outPath, { kind = 'video', duration = 0, h
     );
   }
   args.push('-progress', 'pipe:1', '-nostats', tmp);
-  const res = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY, onStdout: progressParser(duration, (p) => onProgress && onProgress(p.percent)) });
+  const total = range.length ? length : duration;
+  const res = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY, onStdout: progressParser(total, (p) => onProgress && onProgress(p.percent)) });
   if (res.code !== 0 || !fs.existsSync(tmp)) {
     fs.rmSync(tmp, { force: true });
     const err = new Error(res.killed ? 'Cancelado' : 'No se pudo convertir el archivo');
