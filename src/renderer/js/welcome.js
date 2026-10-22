@@ -88,5 +88,5 @@ export async function showWelcome({ onNew, onOpen, onOpenPath, onRecover, onReco
     )
   );
   document.body.append(overlay);
-  return { close };
+  return { close, hasRecovery: !!auto, isOpen: () => overlay.isConnected };
 }

@@ -3,7 +3,8 @@
 import { store } from './store.js';
 import { media, mediaUrl } from './media.js';
 import { drawFrame } from './render.js';
-import { projectDuration, clipEnd, clipHasAudio, snapToFrame } from '../shared/model.js';
+import { ensureFont } from './text-render.js';
+import { projectDuration, clipEnd, clipHasAudio, snapToFrame, isVisual } from '../shared/model.js';
 import { mainTrackItems } from '../shared/layout.js';
 
 const QUALITY_CAP = { high: 1920, medium: 1280, low: 854 };
@@ -410,14 +411,52 @@ export class Player extends EventTarget {
 
   // Fotograma actual en resolución completa (para guardar como imagen).
   async renderStill(scale = 1) {
+    return (await this.stillAt(this.time, scale)).canvas;
+  }
+
+  // Dibuja el proyecto en el instante t (mueve el cursor allí). Antes espera, como mucho timeoutMs, a que los videos
+  // de ese instante terminen de buscar y a que carguen las fotos y las fuentes. Devuelve también lo que no llegó a
+  // estar listo (nombres de los archivos).
+  async stillAt(t, scale = 1, { timeoutMs = 8000 } = {}) {
     if (this.playing) this.pause();
-    this.syncEls(true);
-    await new Promise((r) => setTimeout(r, 150));
+    this.seek(t);
+    t = this.time;
+    this.refreshCache();
     const p = store.project;
+    const visible = p.clips.filter((c) => {
+      const info = this.baseInfo.get(c.id);
+      const s = info ? info.start : c.start;
+      const e = info ? info.end : clipEnd(c);
+      return isVisual(c) && t >= s && t < e && !this.trackMap.get(c.trackId)?.hidden;
+    });
+    await Promise.all(visible.filter((c) => c.type === 'text').map((c) => ensureFont(c.text)));
+    const waiting = () => {
+      const out = [];
+      for (const c of visible) {
+        const m = c.mediaId ? store.getMedia(c.mediaId) : null;
+        if (!m || m.missing) continue;
+        const st = media.getStatus(m.id).state;
+        if (st === 'checking' || st === 'proxy') out.push(m.name);
+        else if (st === 'error') continue;
+        else if (c.type === 'image' && !media.getImage(m.id)) out.push(m.name);
+        else if (c.type === 'video') {
+          const r = this.els.get(c.id);
+          if (!r || (!r.el.error && (r.el.seeking || r.el.readyState < 2 || r.pendingSeek !== null))) out.push(m.name);
+        }
+      }
+      return out;
+    };
+    const deadline = performance.now() + timeoutMs;
+    let pending = waiting();
+    while (pending.length && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 60));
+      this.syncEls(false);
+      pending = waiting();
+    }
     const c = document.createElement('canvas');
-    c.width = Math.round(p.settings.width * scale);
-    c.height = Math.round(p.settings.height * scale);
-    drawFrame(c.getContext('2d'), this.time, this.envFor(scale, true));
-    return c;
+    c.width = Math.max(2, Math.round(p.settings.width * scale));
+    c.height = Math.max(2, Math.round(p.settings.height * scale));
+    drawFrame(c.getContext('2d'), t, this.envFor(scale, true));
+    return { canvas: c, time: t, pending: [...new Set(pending)] };
   }
 }

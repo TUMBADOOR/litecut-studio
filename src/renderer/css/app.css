@@ -2396,3 +2396,181 @@ pre.details {
 body.drop-files .drop-hint {
   display: grid;
 }
+
+/* ---------- Conectar con IA ---------- */
+.btn.ai-btn {
+  position: relative;
+}
+.btn.ai-btn::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+}
+.btn.ai-btn.ready::after {
+  background: var(--accent);
+}
+.btn.ai-btn.linked {
+  color: var(--text);
+}
+.btn.ai-btn.linked::after {
+  background: #3ddc97;
+  box-shadow: 0 0 6px #3ddc97;
+}
+.ai-activity {
+  position: fixed;
+  top: 54px;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #23232b;
+  border: 1px solid var(--line2);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--dim);
+  z-index: 140;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.ai-activity.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ai-activity .spinner {
+  display: none;
+  width: 12px;
+  height: 12px;
+}
+.ai-activity.busy .spinner {
+  display: block;
+}
+.ai-activity.err {
+  border-color: #5a2630;
+  color: #ff8a95;
+}
+.proc-banner.ai-export {
+  top: 96px;
+}
+.ai-dialog {
+  display: grid;
+  gap: 12px;
+}
+.ai-dialog h3 {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+.ai-dialog code {
+  font: 11.5px var(--mono);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: #cfe9e6;
+}
+.ai-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 12.5px;
+  margin-top: -4px;
+}
+.ai-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+.ai-state.ready i {
+  background: var(--accent);
+}
+.ai-state.linked i {
+  background: #3ddc97;
+  box-shadow: 0 0 6px #3ddc97;
+}
+.ai-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+.ai-steps li > .ai-row,
+.ai-steps li > .hint,
+.ai-steps li > .ai-code {
+  margin-top: 6px;
+}
+.ai-steps li > .hint {
+  display: block;
+}
+.ai-steps b {
+  color: var(--text);
+}
+.ai-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ai-install-msg {
+  color: #3ddc97;
+  font-size: 11.5px;
+  word-break: break-all;
+}
+.ai-code {
+  position: relative;
+}
+.ai-code pre {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 84px 10px 12px;
+  font: 11.5px/1.5 var(--mono);
+  color: #cfe9e6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 210px;
+  overflow: auto;
+  user-select: text;
+}
+.ai-code .btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+.ai-examples {
+  display: grid;
+  gap: 6px;
+}
+.ai-example {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font: 12.5px/1.45 var(--font);
+  cursor: pointer;
+}
+.ai-example:hover {
+  border-color: var(--accent);
+}
+.ai-example svg {
+  color: var(--accent);
+  margin-top: 2px;
+}

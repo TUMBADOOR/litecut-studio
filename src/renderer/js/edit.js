@@ -34,7 +34,7 @@ export function addMediaClip(mediaId, { trackId = null, start = null, newTrack =
 }
 
 // Pista superior libre para textos/stickers en [s, e).
-function overlayTrackFor(p, s, e, preferred) {
+export function overlayTrackFor(p, s, e, preferred) {
   const main = mainTrack(p);
   const pref = preferred ? ops.findTrack(p, preferred) : null;
   if (pref && pref.kind === 'video' && !pref.locked && ops.isFree(p, pref.id, s, e)) return pref;

@@ -25,6 +25,7 @@ import { buildExportGraphAuto } from '../shared/export-graph.js';
 import { buildMenu } from './menu.js';
 import { Storage, JobQueue, writeFileAtomic } from './storage.js';
 import { RecorderController } from './recorder.js';
+import { setupAi } from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..');
@@ -56,7 +57,8 @@ const appUrl = (p) => `app://bundle/${p}`;
 const userData = app.getPath('userData');
 // Miniaturas, ondas y proxies (no usar "cache": en Windows coincide con la carpeta Cache de Chromium).
 const cacheDir = path.join(userData, 'media-cache');
-const tempDir = path.join(app.getPath('temp'), 'litecut-studio');
+// Las pruebas usan otra carpeta temporal: al arrancar se vacía y no deben tocar la de una LiteCut abierta.
+const tempDir = path.join(app.getPath('temp'), TEST_SCRIPT ? 'litecut-studio-prueba' : 'litecut-studio');
 const recordingsDir = (TEST_SCRIPT && process.env.LITECUT_RECORDINGS_DIR) || path.join(app.getPath('videos'), 'LiteCut Studio');
 const storage = new Storage(userData);
 const fastJobs = new JobQueue(2);
@@ -70,6 +72,7 @@ let pendingOpen = null;
 let exportJob = null;
 let hwPromise = null;
 let versionPromise = null;
+let ai = null;
 
 const getVersion = () => (versionPromise ||= ffmpegVersion());
 const getHw = () =>
@@ -272,6 +275,7 @@ function createMainWindow() {
     },
   });
   if (small) mainWindow.maximize();
+  ai?.onWindow(mainWindow);
   Menu.setApplicationMenu(buildMenu((cmd) => send('menu', cmd), { isMac }));
   mainWindow.loadURL(appUrl('index.html'));
   mainWindow.once('ready-to-show', () => {
@@ -337,6 +341,7 @@ function runTestScript() {
   );
   ipcMain.handle('test:done', (_e, code) => {
     forceClose = true;
+    ai?.shutdown(); // app.exit() no emite «will-quit»
     setTimeout(() => app.exit(code || 0), 200);
     return true;
   });
@@ -703,6 +708,17 @@ if (!gotLock) {
     }
     registerProtocols();
     registerIpc();
+    ai = setupAi({
+      storage,
+      userData,
+      cacheDir,
+      tempDir,
+      srcDir: SRC,
+      getWindow: () => mainWindow,
+      allowWrite: (file) => allowedWrites.add(file),
+      cacheKey,
+      isTest: !!TEST_SCRIPT,
+    });
     createMainWindow();
     // Detecta codificadores por hardware en segundo plano (la primera vez tarda unos segundos).
     setTimeout(() => getHw().catch(() => {}), 4000);
@@ -714,6 +730,7 @@ if (!gotLock) {
   app.on('window-all-closed', () => app.quit());
   app.on('will-quit', () => {
     if (exportJob) exportJob.ac.abort();
+    ai?.shutdown();
   });
 }
 

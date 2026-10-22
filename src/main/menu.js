@@ -37,6 +37,8 @@ export function buildMenu(send, { isMac }) {
         { label: 'Grabar voz en off…', click: cmd('voiceover') },
         { type: 'separator' },
         { label: 'Exportar video…', accelerator: 'CmdOrCtrl+E', click: cmd('export') },
+        { type: 'separator' },
+        { label: 'Conectar con IA…', click: cmd('ai') },
         ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: 'Salir' }]),
       ],
     },

@@ -5,19 +5,24 @@
   "description": "Editor de video liviano con grabador de pantalla para Windows y macOS",
   "main": "src/main/main.js",
   "type": "module",
+  "bin": {
+    "litecut-mcp": "src/mcp/litecut-mcp.cjs"
+  },
   "author": "LiteCut Studio",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-icon.js",
     "fonts": "node scripts/copy-fonts.js",
-    "test": "node scripts/test-ops.js && node scripts/test-export.js",
+    "test": "node scripts/test-ops.js && node scripts/test-ai.js && node scripts/test-export.js",
+    "test:mcp": "node scripts/test-mcp.js",
     "dist:win": "electron-builder --win --x64 --publish never",
     "dist:mac": "electron-builder --mac -c.mac.identity=- --publish never",
     "dist:mac-arm64": "electron-builder --mac --arm64 -c.mac.identity=- --publish never",
     "dist:mac-x64": "electron-builder --mac --x64 -c.mac.identity=- --publish never"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "ffmpeg-static": "^5.3.0"
   },
   "devDependencies": {
@@ -49,7 +54,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
+      "node_modules/ffmpeg-static/**",
+      "src/mcp/**"
     ],
     "electronLanguages": [
       "es",

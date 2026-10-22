@@ -1,28 +1,7 @@
 // Dibujo de textos en un canvas. Se usa tanto en la vista previa como para exportar (PNG),
 // así el texto exportado es idéntico al que se ve en pantalla.
 
-export const FONTS = [
-  { family: 'Montserrat', weights: [400, 700, 900] },
-  { family: 'Poppins', weights: [400, 600, 800] },
-  { family: 'Oswald', weights: [400, 700] },
-  { family: 'Bebas Neue', weights: [400] },
-  { family: 'Anton', weights: [400] },
-  { family: 'Bangers', weights: [400] },
-  { family: 'Permanent Marker', weights: [400] },
-  { family: 'Pacifico', weights: [400] },
-  { family: 'Lobster', weights: [400] },
-  { family: 'Dancing Script', weights: [400, 700] },
-  { family: 'Caveat', weights: [400, 700] },
-  { family: 'Playfair Display', weights: [400, 700, 900] },
-  { family: 'Arial', system: true },
-  { family: 'Georgia', system: true },
-  { family: 'Times New Roman', system: true },
-  { family: 'Courier New', system: true },
-  { family: 'Verdana', system: true },
-  { family: 'Trebuchet MS', system: true },
-  { family: 'Impact', system: true },
-  { family: 'Comic Sans MS', system: true },
-];
+export { FONTS, TEXT_PRESETS } from '../shared/text-presets.js';
 
 const EMOJI_FALLBACK = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
 
@@ -141,22 +120,5 @@ export async function textToPngBuffer(t, scale) {
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
   return { buffer: await blob.arrayBuffer(), w: c.width, h: c.height };
 }
-
-export const TEXT_PRESETS = [
-  { id: 'title', name: 'Título', text: { content: 'TÍTULO', font: 'Montserrat', weight: 900, size: 120, color: '#ffffff', shadowBlur: 12, shadowY: 4, shadowOpacity: 0.5 } },
-  { id: 'subtitle', name: 'Subtítulo', text: { content: 'Escribe tu subtítulo aquí', font: 'Poppins', weight: 600, size: 52, color: '#ffffff', bgOpacity: 0.6, bgColor: '#000000', bgPadding: 18, bgRadius: 10 }, y: 380 },
-  { id: 'outline', name: 'Contorno', text: { content: 'CONTORNO', font: 'Bebas Neue', weight: 400, size: 140, color: '#ffffff', strokeColor: '#000000', strokeWidth: 7 } },
-  { id: 'yellow', name: 'Impacto', text: { content: '¡INCREÍBLE!', font: 'Anton', weight: 400, size: 120, color: '#ffd400', strokeColor: '#111111', strokeWidth: 6, shadowBlur: 0, shadowX: 6, shadowY: 6, shadowOpacity: 0.9 } },
-  { id: 'neon', name: 'Neón', text: { content: 'Neón', font: 'Poppins', weight: 800, size: 110, color: '#c8fffb', shadowColor: '#00f0ff', shadowBlur: 28, shadowOpacity: 1 } },
-  { id: 'comic', name: 'Cómic', text: { content: '¡POW!', font: 'Bangers', weight: 400, size: 140, color: '#ffffff', strokeColor: '#1b1b1b', strokeWidth: 7, shadowX: 7, shadowY: 7, shadowOpacity: 1, shadowColor: '#ff3d5a' } },
-  { id: 'script', name: 'Manuscrito', text: { content: 'Hola', font: 'Pacifico', weight: 400, size: 110, color: '#ffffff', shadowBlur: 10, shadowY: 3, shadowOpacity: 0.55 } },
-  { id: 'elegant', name: 'Elegante', text: { content: 'Elegante', font: 'Playfair Display', weight: 700, italic: true, size: 100, color: '#f5e6c8' } },
-  { id: 'label', name: 'Etiqueta', text: { content: 'NUEVO', font: 'Montserrat', weight: 700, size: 48, color: '#111111', bgColor: '#ffd400', bgOpacity: 1, bgPadding: 16, bgRadius: 8, letterSpacing: 2 } },
-  { id: 'marker', name: 'Marcador', text: { content: 'Importante', font: 'Permanent Marker', weight: 400, size: 96, color: '#ff4d6d' } },
-  { id: 'retro', name: 'Retro', text: { content: 'Retro', font: 'Lobster', weight: 400, size: 120, color: '#ff9f1c', strokeColor: '#2b2d42', strokeWidth: 5 } },
-  { id: 'minimal', name: 'Minimal', text: { content: 'minimal', font: 'Montserrat', weight: 400, size: 64, color: '#ffffff', letterSpacing: 14, uppercase: true } },
-  { id: 'lower', name: 'Rótulo', text: { content: 'Nombre Apellido\nCargo o descripción', font: 'Poppins', weight: 600, size: 46, color: '#ffffff', align: 'left', bgColor: '#14d4c4', bgOpacity: 0.92, bgPadding: 22, bgRadius: 6, lineHeight: 1.3 }, x: -520, y: 360 },
-  { id: 'handwrite', name: 'Notas', text: { content: 'Nota rápida', font: 'Caveat', weight: 700, size: 96, color: '#ffffff', shadowBlur: 6, shadowOpacity: 0.5 } },
-];
 
 export const STICKERS = ['😀', '😂', '🤣', '😍', '🤩', '😎', '🥳', '😮', '😱', '😢', '😡', '🤔', '👍', '👎', '👏', '🙌', '🙏', '💪', '🔥', '✨', '⭐', '💯', '❤️', '💔', '🎉', '🎁', '🎂', '📌', '📍', '✅', '❌', '⚠️', '❓', '❗', '💡', '🚀', '🎬', '🎵', '🎮', '📱', '💻', '⏰', '📢', '👉', '👈', '👆', '👇', '➡️', '⬅️', '⬆️', '⬇️', '💥', '💬', '👀', '🤯', '😴'];

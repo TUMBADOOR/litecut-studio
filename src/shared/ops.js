@@ -393,6 +393,138 @@ function rippleAfter(p, c, delta) {
   }
 }
 
+// Recorta (o alarga, con valores negativos) los bordes de un clip: head = segundos que se quitan del principio,
+// tail = segundos que se quitan del final. En la pista principal el clip no se mueve y los siguientes se desplazan
+// (no quedan huecos); en las demás se mueve el borde izquierdo y nunca se pisa a los clips vecinos.
+export function trimClip(p, clipId, { head = 0, tail = 0 } = {}) {
+  const c = findClip(p, clipId);
+  if (!c) return null;
+  const m = c.mediaId ? findMedia(p, c.mediaId) : null;
+  const sp = c.speed || 1;
+  const hasSource = (c.type === 'video' || c.type === 'audio') && m?.duration > 0;
+  const main = mainTrack(p);
+  const magnetic = !!main && c.trackId === main.id;
+  const list = trackClips(p, c.trackId);
+  const i = list.findIndex((x) => x.id === c.id);
+  const prevEnd = i > 0 ? Math.min(c.start, clipEnd(list[i - 1])) : 0;
+  const nextStart = i < list.length - 1 ? Math.max(clipEnd(c), list[i + 1].start) : Infinity;
+  if (c.type === 'audio') c.linkedTo = null; // recortar el audio por separado lo desvincula
+  const oldDur = c.duration;
+  let h = Number(head) || 0;
+  if (hasSource) h = Math.max(h, -c.in / sp);
+  if (!magnetic) h = Math.max(h, prevEnd - c.start);
+  h = Math.min(h, c.duration - MIN_CLIP);
+  if (hasSource) c.in = Math.max(0, c.in + h * sp);
+  if (!magnetic) c.start += h;
+  c.duration -= h;
+  let maxDur = hasSource ? (m.duration - c.in) / sp : Infinity;
+  if (!magnetic) maxDur = Math.min(maxDur, nextStart - c.start);
+  c.duration = clamp(c.duration - (Number(tail) || 0), MIN_CLIP, Math.max(MIN_CLIP, maxDur));
+  if (magnetic) rippleAfter(p, c, c.duration - oldDur);
+  return c;
+}
+
+// Quita el tramo [s, e) de una pista y junta lo que queda: los clips de esa pista que van después se adelantan.
+// El audio separado de los videos sigue a sus trozos (o se elimina con ellos). Las demás pistas no se mueven.
+// Una transición que toca el tramo se convierte en un corte. Devuelve los segundos quitados.
+export function removeRange(p, trackId, s, e) {
+  s = Math.max(0, s);
+  const d = e - s;
+  if (!(d > EPS) || !findTrack(p, trackId)) return 0;
+  const tol = MIN_CLIP / 2; // splitClip no corta tan cerca de un borde
+  const before = trackClips(p, trackId);
+  for (let i = 1; i < before.length; i++) {
+    const a = before[i - 1];
+    const b = before[i];
+    if (b.transitionIn && b.start < e + tol && clipEnd(a) > s - tol) {
+      b.transitionIn = null;
+      if (clipEnd(a) > b.start) a.duration = Math.max(MIN_CLIP, b.start - a.start);
+    }
+  }
+  for (const t of [s, e]) {
+    for (const c of trackClips(p, trackId)) if (t > c.start + tol && t < clipEnd(c) - tol) splitClip(p, c.id, t);
+  }
+  const gone = new Set();
+  for (const c of trackClips(p, trackId)) {
+    const ce = clipEnd(c);
+    if (ce <= s + EPS || c.start >= e - EPS) continue;
+    if (c.start >= s - tol && ce <= e + tol) gone.add(c.id);
+    else if (ce > e + tol) {
+      // Empieza (casi) dentro del tramo: se le quita la cabeza.
+      const h = e - c.start;
+      if (c.type === 'video' || c.type === 'audio') c.in += h * (c.speed || 1);
+      c.start = e;
+      c.duration = Math.max(MIN_CLIP, c.duration - h);
+    } else {
+      c.duration = Math.max(MIN_CLIP, s - c.start); // termina un poco dentro: se le quita la cola
+    }
+  }
+  for (const a of p.clips) if (a.type === 'audio' && a.linkedTo && gone.has(a.linkedTo)) gone.add(a.id);
+  p.clips = p.clips.filter((c) => !gone.has(c.id));
+  for (const c of trackClips(p, trackId)) if (c.start >= e - EPS) c.start = Math.max(0, c.start - d);
+  return d;
+}
+
+// ---------- Tramos de tiempo ({ start, end } en segundos) ----------
+
+export function mergeRanges(ranges, gap = 1e-3) {
+  const out = [];
+  for (const r of [...ranges].filter((x) => x.end > x.start).sort((a, b) => a.start - b.start)) {
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end + gap) last.end = Math.max(last.end, r.end);
+    else out.push({ start: r.start, end: r.end });
+  }
+  return out;
+}
+
+// Resta a cada tramo las zonas protegidas.
+export function subtractRanges(ranges, cuts) {
+  let out = mergeRanges(ranges);
+  for (const z of mergeRanges(cuts)) {
+    const next = [];
+    for (const r of out) {
+      if (z.end <= r.start || z.start >= r.end) next.push(r);
+      else {
+        if (z.start > r.start) next.push({ start: r.start, end: z.start });
+        if (z.end < r.end) next.push({ start: z.end, end: r.end });
+      }
+    }
+    out = next;
+  }
+  return out;
+}
+
+// Convierte tramos de la fuente (segundos del archivo) en tramos de la línea de tiempo dentro de un clip.
+// margin acerca los bordes hacia dentro donde hay contenido al otro lado (p. ej. para no cortar el inicio de una palabra).
+export function sourceRangesToTimeline(clip, ranges, { margin = 0, minLength = 0 } = {}) {
+  const sp = clip.speed || 1;
+  const s0 = clip.in || 0;
+  const s1 = s0 + clip.duration * sp;
+  const out = [];
+  for (const r of ranges) {
+    const a = Math.max(r.start, s0);
+    const b = Math.min(r.end, s1);
+    if (b <= a) continue;
+    let ts = clip.start + (a - s0) / sp;
+    let te = clip.start + (b - s0) / sp;
+    if (a > s0 + 1e-3) ts += margin;
+    if (b < s1 - 1e-3) te -= margin;
+    if (te - ts > Math.max(EPS, minLength)) out.push({ start: ts, end: te });
+  }
+  return out;
+}
+
+// Zonas de la pista principal donde hay una transición (se solapan dos clips).
+export function transitionZones(p, trackId) {
+  const list = trackClips(p, trackId);
+  const out = [];
+  for (let i = 1; i < list.length; i++) {
+    const end = clipEnd(list[i - 1]);
+    if (list[i].transitionIn && end > list[i].start) out.push({ start: list[i].start, end });
+  }
+  return out;
+}
+
 export function removeTrack(p, trackId) {
   const tr = findTrack(p, trackId);
   if (!tr) return false;

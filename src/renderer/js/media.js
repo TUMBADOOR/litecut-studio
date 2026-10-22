@@ -46,13 +46,18 @@ class MediaManager extends EventTarget {
     return m.proxyPath || m.path;
   }
 
-  async importPaths(paths) {
+  // errors (opcional): lista donde se anotan { path, message } de los archivos que no se pudieron importar.
+  async importPaths(paths, { errors = null } = {}) {
     const added = [];
+    const fail = (p, message, timeout) => {
+      toast(message, { type: 'error', timeout });
+      errors?.push({ path: p, message });
+    };
     for (const p of paths) {
       if (!p) continue;
       const kind = mediaKindFromPath(p);
       if (!kind) {
-        toast(`Formato no compatible: ${baseName(p)}`, { type: 'error' });
+        fail(p, `Formato no compatible: ${baseName(p)}`);
         continue;
       }
       const existing = store.project.media.find((m) => m.path === p);
@@ -62,18 +67,18 @@ class MediaManager extends EventTarget {
       }
       const r = await api.media.probe(p);
       if (!r.ok) {
-        toast(`No se pudo abrir «${baseName(p)}»: ${r.error.message}`, { type: 'error', timeout: 7000 });
+        fail(p, `No se pudo abrir «${baseName(p)}»: ${r.error.message}`, 7000);
         continue;
       }
       const info = r.info;
       let k = kind;
       if (kind === 'video' && !info.hasVideo && info.hasAudio) k = 'audio';
       if (k === 'audio' && !info.hasAudio) {
-        toast(`«${baseName(p)}» no tiene audio`, { type: 'error' });
+        fail(p, `«${baseName(p)}» no tiene audio`);
         continue;
       }
       if ((k === 'video' || k === 'image') && !(info.width > 0)) {
-        toast(`No se pudo leer el tamaño de «${baseName(p)}»`, { type: 'error' });
+        fail(p, `No se pudo leer el tamaño de «${baseName(p)}»`);
         continue;
       }
       const m = {

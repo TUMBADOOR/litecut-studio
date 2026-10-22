@@ -38,6 +38,41 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
   se crean con prioridad baja para no trabar nada.
 - Si un video tarda en cargar, la reproducción espera un instante (aviso «Cargando…») en vez de saltar y cortar el audio.
 
+**Conectar con tu IA** (Claude, Gemini y otras compatibles con MCP)
+- Pídele a tu asistente, con tu propia cuenta, cosas como «importa este video, corta los silencios, pon un título y
+  expórtalo en 9:16». Los cambios se ven al instante en LiteCut y cada uno se deshace con Ctrl+Z.
+- La IA puede **ver** el proyecto (fotogramas pequeños) y **analizar** los videos sin reproducirlos: silencios,
+  cambios de escena y fotogramas de muestra, con FFmpeg y a baja prioridad para no cargar el equipo.
+
+## Conectar con tu IA
+
+LiteCut incluye un **servidor MCP local** (el estándar que usan Claude Desktop, Gemini CLI, Cursor, VS Code, LM Studio…).
+Tu app de IA lanza un pequeño puente (`litecut-mcp`) que habla con LiteCut abierto. Todo ocurre en tu equipo: LiteCut
+escucha solo en `127.0.0.1` con una clave aleatoria que cambia en cada inicio; nada queda abierto a internet ni a tu red.
+Tu app de IA sí envía a su proveedor (Anthropic, Google…) los datos del proyecto y los fotogramas que pide, como con
+cualquier otra conversación de tu cuenta.
+
+1. En LiteCut pulsa **IA** (barra superior) y activa **«Permitir que las apps de IA de este equipo usen LiteCut»**.
+2. Elige tu app:
+   - **Claude Desktop** (sirve el plan gratuito): pulsa **Configurar Claude Desktop**, o copia el bloque que muestra
+     la ventana en Configuración › Desarrollador › Editar configuración. Cierra Claude por completo y vuelve a abrirlo.
+   - **Gemini CLI** (`npm install -g @google/gemini-cli`, nivel gratuito con tu cuenta de Google): pulsa
+     **Configurar Gemini CLI** o pega el bloque en `~/.gemini/settings.json`. Comprueba con `/mcp` que aparece «litecut».
+   - **Otras apps**: la pestaña «Otras apps» da la configuración `mcpServers` estándar, el comando y la orden para Claude Code.
+3. Pide lo que quieras. Si LiteCut está cerrado, se abre solo al usar la primera herramienta.
+
+La configuración usa el propio ejecutable de LiteCut como intérprete (`ELECTRON_RUN_AS_NODE=1`), así que no hace falta
+instalar Node.js. Con la **versión portable** no funciona (cambia de carpeta en cada arranque): usa el instalador.
+
+**Herramientas que recibe la IA**: `ver_proyecto`, `ver_clip`, `importar_medios`, `agregar_clip`, `dividir`,
+`recortar_clip`, `mover_clip`, `eliminar_clips`, `eliminar_tramo`, `cambiar_velocidad`, `ajustar_clip`, `agregar_texto`,
+`editar_texto`, `poner_transicion`, `quitar_transicion`, `aplicar_filtro`, `configurar_proyecto`, `ver_fotograma`,
+`exportar` (con progreso), `estado_exportacion`, `deshacer`, `rehacer`, `detectar_silencios`, `cortar_silencios`,
+`detectar_escenas`, `fotogramas_de_muestra` y `guardar_proyecto`. Exportar nunca sobrescribe un archivo salvo que se pida.
+
+**Si algo falla**: «la conexión con IA está desactivada» → actívala en LiteCut › IA. «No se pudo conectar» → cierra y
+vuelve a abrir LiteCut y tu app de IA. Si cambias LiteCut de carpeta, vuelve a pulsar «Configurar…».
+
 ## Usar la app en Windows
 
 En la carpeta `dist` está:
@@ -84,17 +119,24 @@ Requisitos: Node.js 22 o superior (en este equipo hay una copia portable en `too
 ```bash
 npm install        # dependencias
 npm start          # abrir la app sin instalar (en Windows: iniciar.bat)
-npm test           # pruebas de edición y de exportación con FFmpeg
+npm test           # pruebas de edición, de la conexión con IA y de exportación con FFmpeg
+npm run test:mcp   # prueba de punta a punta: abre LiteCut en modo de prueba y lo maneja como un cliente MCP
 npm run dist:win   # instalador de Windows (o construir-windows.bat)
 npm run dist:mac   # versión de Mac (en una Mac)
 ```
 
+En desarrollo, el puente MCP se puede lanzar con Node: `node src/mcp/litecut-mcp.cjs` (opciones `--dir <carpeta de datos>`
+y `--no-launch`). Las herramientas se describen en `src/shared/ai-tools.js` y se implementan en
+`src/renderer/js/ai-commands.js`; desde la consola de desarrollo se pueden probar con `await __app.ai('ver_proyecto', {})`.
+
 ### Estructura
 ```
-src/main/        Proceso principal de Electron: ventanas, menú, FFmpeg, exportación, grabador
+src/main/        Proceso principal de Electron: ventanas, menú, FFmpeg, exportación, grabador,
+                 servidor MCP local para asistentes de IA (ai.js, ai-server.js)
+src/mcp/         Puente «litecut-mcp» por stdio que lanzan las apps de IA
 src/renderer/    Interfaz: editor (index.html), barra de grabación y selector de región
 src/shared/      Código común a vista previa y exportación: modelo, efectos, geometría,
-                 operaciones de edición y generador del grafo de FFmpeg
+                 operaciones de edición, generador del grafo de FFmpeg y herramientas para IA
 scripts/         Pruebas, ícono y copia de fuentes
 build/           Ícono y permisos de macOS para el instalador
 ```

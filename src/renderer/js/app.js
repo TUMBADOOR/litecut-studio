@@ -10,6 +10,8 @@ import { openExportDialog } from './export-dialog.js';
 import { openRecorderDialog } from './recorder-dialog.js';
 import { openVoiceover } from './voiceover.js';
 import { showWelcome } from './welcome.js';
+import { initAiCommands, runQueued } from './ai-commands.js';
+import { openAiDialog, clientLabel } from './ai-dialog.js';
 import { h, $, toast, modal, choiceDialog, alertDialog, isTypingTarget, closeTopModal, hasOpenModal, modKey, btn, iconBtn, contextMenu, closeContextMenu, isMac } from './ui.js';
 import { icon } from './icons.js';
 import { createProject, clipEnd, ASPECTS, isVisual, createClip } from '../shared/model.js';
@@ -24,6 +26,7 @@ const nameInput = h('input', { class: 'proj-name', value: store.project.name, ti
 const dirtyDot = h('span', { class: 'dirty-dot', title: 'Cambios sin guardar' });
 nameInput.addEventListener('change', () => store.mutate((p) => (p.name = nameInput.value.trim() || 'Proyecto sin título')));
 nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && nameInput.blur());
+const aiBtn = btn('IA', { kind: 'small ghost ai-btn', icon: 'sparkles', title: 'Conectar con IA (Claude, Gemini…)', onClick: () => openAiDialog() });
 $('#topbar').append(
   h('div', { class: 'brand' }, h('span', { class: 'logo-mark', html: icon('logo', 26) }), h('b', {}, 'LiteCut'), h('span', {}, 'Studio')),
   h(
@@ -37,6 +40,7 @@ $('#topbar').append(
   h(
     'div',
     { class: 'tb-right' },
+    aiBtn,
     btn('Importar', { kind: 'small', icon: 'import', title: `Importar medios (${modKey}+I)`, onClick: () => importMedia() }),
     btn('Grabar', { kind: 'small rec-btn', icon: 'record', title: `Grabar pantalla (${modKey}+Mayús+R)`, onClick: () => openRecorder() }),
     btn('Exportar', { kind: 'small primary', icon: 'export', title: `Exportar video (${modKey}+E)`, onClick: () => openExport() }),
@@ -46,6 +50,7 @@ $('#topbar').append(
         { label: 'Guardar como…', icon: 'save', shortcut: `${modKey}+Mayús+S`, onClick: () => saveProject(true) },
         { label: 'Grabar voz en off', icon: 'mic', onClick: () => openVoice() },
         { label: 'Carpeta de grabaciones', icon: 'folder', onClick: () => api.shell.openRecordings() },
+        { label: 'Conectar con IA…', icon: 'sparkles', onClick: () => openAiDialog() },
         'sep',
         { label: 'Atajos de teclado', icon: 'keyboard', shortcut: 'F1', onClick: () => showShortcuts() },
         { label: 'Acerca de LiteCut Studio', icon: 'info', onClick: () => showAbout() },
@@ -87,6 +92,7 @@ window.__app = {
   openExport: () => openExport(),
   openProjectPath: (p) => openProjectPath(p, { skipConfirm: true }),
   saveProject: (asNew) => saveProject(asNew),
+  ai: (name, args) => runQueued(name, args),
 };
 
 // ---------- Proyectos ----------
@@ -390,6 +396,8 @@ api.app.onMenu((cmd) => {
       return openVoice();
     case 'export':
       return openExport();
+    case 'ai':
+      return openAiDialog();
     case 'undo':
       if (typing) document.execCommand('undo');
       else store.undo();
@@ -683,3 +691,40 @@ if (!api.isTest) {
     if (openedFromFile) w.close();
   });
 }
+
+// ---------- Asistentes de IA (servidor MCP local) ----------
+const aiPill = h('div', { class: 'ai-activity' }, h('span', { class: 'spinner' }), h('span', { class: 'txt' }));
+document.body.append(aiPill);
+let aiPillTimer = null;
+
+function updateAiButton(s) {
+  aiBtn.classList.toggle('ready', !!s.enabled);
+  aiBtn.classList.toggle('linked', !!s.enabled && s.clients.length > 0);
+  const names = [...new Set(s.clients.map((c) => clientLabel(c.title || c.name)))];
+  aiBtn.title = !s.enabled ? 'Conectar con IA (Claude, Gemini…)' : names.length ? `IA conectada: ${names.join(', ')}` : 'Conexión con IA activada: esperando a tu app de IA';
+}
+api.ai.onStatus(updateAiButton);
+api.ai.status().then(updateAiButton);
+
+initAiCommands({
+  player,
+  timeline,
+  // Antes de que la IA cambie el proyecto: se cierra la bienvenida (salvo que haya algo que recuperar).
+  beforeEdit: () => {
+    if (welcome?.isOpen()) {
+      if (welcome.hasRecovery) throw new Error('LiteCut muestra la pantalla de inicio con un proyecto sin guardar que se puede recuperar. Pide al usuario que elija «Recuperar» o un formato de proyecto nuevo, y vuelve a intentarlo.');
+      welcome.close();
+    }
+    suggested = true; // la IA decide el lienzo: no se sugiere ajustarlo
+  },
+  onActivity: ({ state, title, client, error }) => {
+    clearTimeout(aiPillTimer);
+    aiPill.classList.add('on');
+    aiPill.classList.toggle('busy', state === 'start');
+    aiPill.classList.toggle('err', state === 'done' && !!error);
+    const who = client ? clientLabel(client) : 'IA';
+    aiPill.querySelector('.txt').textContent = `${who} · ${title}${state === 'start' ? '…' : error ? ': no se pudo' : ' ✓'}`;
+    if (state === 'done') aiPillTimer = setTimeout(() => aiPill.classList.remove('on'), 2600);
+  },
+  onSaved: () => updateTitle(),
+});

@@ -391,6 +391,144 @@ export async function extractFrame(file, time, outPath) {
   return outPath;
 }
 
+// ---------- Análisis para asistentes de IA ----------
+// Livianos para equipos modestos: prioridad baja, solo la pista necesaria, video reducido antes de analizarlo
+// y un tiempo máximo (maxSeconds) tras el cual se devuelve lo analizado hasta ese momento.
+
+function limitedSignal(signal, maxSeconds) {
+  const ac = new AbortController();
+  const state = { signal: ac.signal, timedOut: false };
+  const onAbort = () => ac.abort();
+  if (signal) {
+    if (signal.aborted) ac.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = maxSeconds > 0 ? setTimeout(() => ((state.timedOut = true), ac.abort()), maxSeconds * 1000) : null;
+  state.done = () => {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  };
+  return state;
+}
+
+function analysisError(res, message) {
+  const err = new Error(res.killed ? 'Análisis cancelado' : message);
+  err.details = lastLines(res.stderr, 6);
+  return err;
+}
+
+// Pausas del sonido en segundos del archivo: { silences: [{ start, end }], complete, analyzed }.
+export async function detectSilences(file, { noise = -35, minDuration = 0.5, duration = 0, maxSeconds = 0, signal, onProgress } = {}) {
+  const lim = limitedSignal(signal, maxSeconds);
+  const silences = [];
+  let open = null;
+  let reached = 0;
+  const args = ['-hide_banner', '-nostdin', '-i', file, '-map', '0:a:0', '-vn', '-sn', '-dn'];
+  args.push('-af', `silencedetect=noise=${noise}dB:d=${minDuration}`, '-f', 'null', '-progress', 'pipe:1', '-nostats', '-');
+  const res = await runFfmpeg(args, {
+    signal: lim.signal,
+    priority: BACKGROUND_PRIORITY,
+    onLine: (l) => {
+      const s = /silence_start:\s*(-?[\d.]+)/.exec(l);
+      if (s) open = Math.max(0, parseFloat(s[1]));
+      const e = /silence_end:\s*(-?[\d.]+)/.exec(l);
+      if (e) {
+        silences.push({ start: open ?? 0, end: parseFloat(e[1]) });
+        open = null;
+      }
+    },
+    onStdout: progressParser(duration, (p) => {
+      reached = p.time;
+      onProgress?.(p.percent);
+    }),
+  });
+  lim.done();
+  if (!lim.timedOut && (res.killed || res.code !== 0)) throw analysisError(res, 'No se pudo analizar el sonido (¿el archivo tiene audio?)');
+  const end = lim.timedOut ? reached : duration || reached;
+  if (open !== null && end > open) silences.push({ start: open, end }); // termina en silencio
+  return { silences: silences.filter((s) => s.end > s.start), complete: !lim.timedOut, analyzed: end };
+}
+
+// Cambios de escena (filtro scdet) en segundos del archivo: { scenes: [{ time, score }], complete, analyzedUntil }.
+export async function detectScenes(file, { threshold = 12, start = 0, duration = 0, width = 192, maxSeconds = 0, signal, onProgress } = {}) {
+  const lim = limitedSignal(signal, maxSeconds);
+  const scenes = [];
+  let reached = 0;
+  const args = ['-hide_banner', '-nostdin'];
+  if (start > 0) args.push('-ss', start.toFixed(3));
+  if (duration > 0) args.push('-t', duration.toFixed(3));
+  args.push('-i', file, '-map', '0:v:0', '-an', '-sn', '-dn');
+  args.push('-vf', `scale=${width}:-2:flags=fast_bilinear,scdet=threshold=${threshold}`, '-f', 'null', '-progress', 'pipe:1', '-nostats', '-');
+  const res = await runFfmpeg(args, {
+    signal: lim.signal,
+    priority: BACKGROUND_PRIORITY,
+    onLine: (l) => {
+      const m = /lavfi\.scd\.score:\s*([\d.]+),\s*lavfi\.scd\.time:\s*(-?[\d.]+)/.exec(l);
+      if (m) scenes.push({ time: start + parseFloat(m[2]), score: parseFloat(m[1]) });
+    },
+    onStdout: progressParser(duration, (p) => {
+      reached = p.time;
+      onProgress?.(p.percent);
+    }),
+  });
+  lim.done();
+  if (!lim.timedOut && (res.killed || res.code !== 0)) throw analysisError(res, 'No se pudo analizar el video');
+  return { scenes, complete: !lim.timedOut, analyzedUntil: start + (lim.timedOut ? reached : duration || reached) };
+}
+
+const imageCodecArgs = (format) => (format === 'png' ? ['-c:v', 'png'] : ['-c:v', 'mjpeg', '-q:v', '4']);
+
+// Varias imágenes pequeñas repartidas en [start, end) con una sola pasada de FFmpeg: decodifica el tramo
+// (rápido en tramos cortos) o, con keyframesOnly, solo los fotogramas clave (rápido en videos largos).
+// Devuelve [{ time, file }] con el instante real de cada imagen en segundos del archivo.
+export async function sampleFrames(file, outDir, { start = 0, end, count = 6, width = 320, format = 'jpeg', keyframesOnly = false, signal } = {}) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const ext = format === 'png' ? 'png' : 'jpg';
+  const span = Math.max(0.1, end - start);
+  const interval = span / count;
+  const select = keyframesOnly
+    ? `select=isnan(prev_selected_t)+gte(t-prev_selected_t\\,${interval.toFixed(3)})`
+    : `select=isnan(prev_selected_t)*gte(t\\,${(interval / 2).toFixed(3)})+gte(t-prev_selected_t\\,${interval.toFixed(3)})`;
+  const times = [];
+  const args = ['-hide_banner', '-nostdin', '-y'];
+  if (keyframesOnly) args.push('-skip_frame', 'nokey');
+  if (start > 0) args.push('-ss', start.toFixed(3));
+  args.push('-t', span.toFixed(3), '-i', file, '-map', '0:v:0', '-an', '-sn', '-dn');
+  args.push('-vf', `${select},scale=${width}:-2:flags=bicubic,showinfo`, '-fps_mode', 'vfr', '-frames:v', String(count));
+  args.push(...imageCodecArgs(format), path.join(outDir, `m_%02d.${ext}`));
+  const res = await runFfmpeg(args, {
+    signal,
+    priority: BACKGROUND_PRIORITY,
+    onLine: (l) => {
+      const m = /Parsed_showinfo.*?pts_time:\s*(-?[\d.]+)/.exec(l);
+      if (m) times.push(start + Math.max(0, parseFloat(m[1])));
+    },
+  });
+  if (res.killed) throw analysisError(res, '');
+  return fs
+    .readdirSync(outDir)
+    .filter((f) => f.startsWith('m_') && f.endsWith(`.${ext}`))
+    .sort()
+    .map((f, i) => ({ time: times[i] ?? start + interval * (i + 0.5), file: path.join(outDir, f) }));
+}
+
+// Un fotograma pequeño en el instante t (segundos del archivo), como Buffer de imagen.
+export async function grabFrame(file, t, { width = 320, format = 'jpeg', signal } = {}) {
+  const run = async (inputSeek) => {
+    const chunks = [];
+    const ss = ['-ss', Math.max(0, t).toFixed(3)];
+    const args = ['-hide_banner', '-nostdin', ...(inputSeek ? ss : []), '-i', file, ...(inputSeek ? [] : ss), '-map', '0:v:0', '-an', '-sn', '-dn'];
+    args.push('-frames:v', '1', '-vf', `scale=${width}:-2:flags=bicubic`, ...imageCodecArgs(format), '-f', 'image2pipe', 'pipe:1');
+    const res = await runFfmpeg(args, { signal, priority: BACKGROUND_PRIORITY, onStdout: (d) => chunks.push(d) });
+    if (res.killed) throw analysisError(res, '');
+    return Buffer.concat(chunks);
+  };
+  let buf = await run(true);
+  if (!buf.length) buf = await run(false); // archivos sin índice: decodificar desde el principio
+  if (!buf.length) throw new Error('No se pudo extraer el fotograma');
+  return buf;
+}
+
 // ---------- Codificadores por hardware ----------
 
 const HW_CANDIDATES = {

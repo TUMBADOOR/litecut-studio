@@ -22,7 +22,7 @@ const HW_NAMES = {
   hevc_videotoolbox: 'Apple VideoToolbox',
 };
 
-const FORMATS = [
+export const FORMATS = [
   { id: 'mp4', label: 'MP4', ext: 'mp4', desc: 'Video H.264 — compatible con todo (YouTube, WhatsApp, TikTok…)' },
   { id: 'mp4-hevc', label: 'MP4 H.265', ext: 'mp4', desc: 'Archivo más pequeño con la misma calidad (equipos recientes)' },
   { id: 'webm', label: 'WebM', ext: 'webm', desc: 'Formato web abierto (VP9)' },
@@ -31,7 +31,7 @@ const FORMATS = [
   { id: 'wav', label: 'WAV', ext: 'wav', desc: 'Solo el audio, sin compresión' },
 ];
 
-function resolutionOptions(PW, PH, gif) {
+export function resolutionOptions(PW, PH, gif) {
   const short = Math.min(PW, PH);
   const out = [];
   const add = (label, w, h) => {
@@ -51,6 +51,22 @@ function resolutionOptions(PW, PH, gif) {
     add(label, even(PW * s), even(PH * s));
   }
   return out;
+}
+
+// Textos → PNG a la escala de salida (la exportación los superpone tal como se ven en la vista previa).
+export async function renderTextAssets(project, outWidth) {
+  const assets = { text: {} };
+  const k = outWidth / project.settings.width;
+  for (const c of textClipsToRender(project)) {
+    try {
+      const r = await textToPngBuffer(c.text, k * (c.transform.scale || 1));
+      const path = await api.fs.writeTemp(`texto_${c.id}.png`, r.buffer);
+      assets.text[c.id] = { path, w: r.w, h: r.h };
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  return assets;
 }
 
 export async function openExportDialog({ player }) {
@@ -246,20 +262,7 @@ export async function openExportDialog({ player }) {
     body.append(h('div', { class: 'ex-progress' }, h('div', { class: 'ex-ic', html: icon('export', 30) }), pct, bar, detail, h('div', { class: 'modal-foot inline' }, cancel)));
     m.overlay.classList.add('busy');
 
-    // Textos → PNG a la escala de salida
-    const assets = { text: {} };
-    if (!audioOnly) {
-      const k = settings.width / p.settings.width;
-      for (const c of textClipsToRender(p)) {
-        try {
-          const r = await textToPngBuffer(c.text, k * (c.transform.scale || 1));
-          const path = await api.fs.writeTemp(`texto_${c.id}.png`, r.buffer);
-          assets.text[c.id] = { path, w: r.w, h: r.h };
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    }
+    const assets = audioOnly ? { text: {} } : await renderTextAssets(p, settings.width);
     const t0 = Date.now();
     const off = api.exporter.onProgress((pr) => {
       const v = Math.round((pr.percent || 0) * 1000) / 10;
