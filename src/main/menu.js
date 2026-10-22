@@ -38,6 +38,7 @@ export function buildMenu(send, { isMac }) {
         { type: 'separator' },
         { label: 'Exportar video…', accelerator: 'CmdOrCtrl+E', click: cmd('export') },
         { type: 'separator' },
+        { label: 'Asistente de IA', click: cmd('assistant') },
         { label: 'Conectar con IA…', click: cmd('ai') },
         ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: 'Salir' }]),
       ],

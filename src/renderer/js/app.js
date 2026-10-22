@@ -26,7 +26,9 @@ const nameInput = h('input', { class: 'proj-name', value: store.project.name, ti
 const dirtyDot = h('span', { class: 'dirty-dot', title: 'Cambios sin guardar' });
 nameInput.addEventListener('change', () => store.mutate((p) => (p.name = nameInput.value.trim() || 'Proyecto sin título')));
 nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && nameInput.blur());
-const aiBtn = btn('IA', { kind: 'small ghost ai-btn', icon: 'sparkles', title: 'Conectar con IA (Claude, Gemini…)', onClick: () => openAiDialog() });
+const aiBtn = btn('IA', { kind: 'small ghost ai-btn', icon: 'sparkles', title: 'Conectar con IA (Claude, Gemini…)', onClick: () => openAi() });
+// «Conectar con IA» (apps de escritorio por MCP) ofrece también el asistente integrado, para quien no tiene una.
+const openAi = () => openAiDialog({ onOpenAssistant: () => panels.show('assistant') });
 $('#topbar').append(
   h('div', { class: 'brand' }, h('span', { class: 'logo-mark', html: icon('logo', 26) }), h('b', {}, 'LiteCut'), h('span', {}, 'Studio')),
   h(
@@ -50,7 +52,8 @@ $('#topbar').append(
         { label: 'Guardar como…', icon: 'save', shortcut: `${modKey}+Mayús+S`, onClick: () => saveProject(true) },
         { label: 'Grabar voz en off', icon: 'mic', onClick: () => openVoice() },
         { label: 'Carpeta de grabaciones', icon: 'folder', onClick: () => api.shell.openRecordings() },
-        { label: 'Conectar con IA…', icon: 'sparkles', onClick: () => openAiDialog() },
+        { label: 'Asistente de IA', icon: 'chat', onClick: () => panels.show('assistant') },
+        { label: 'Conectar con IA…', icon: 'sparkles', onClick: () => openAi() },
         'sep',
         { label: 'Atajos de teclado', icon: 'keyboard', shortcut: 'F1', onClick: () => showShortcuts() },
         { label: 'Acerca de LiteCut Studio', icon: 'info', onClick: () => showAbout() },
@@ -69,6 +72,7 @@ const panels = new Panels($('#sidetabs'), $('#panel'), {
   importMedia: (kind) => importMedia(kind),
   openRecorder: () => openRecorder(),
   openVoiceover: () => openVoice(),
+  openAiDialog: () => openAi(),
 });
 viewer.onSnapshot = () => saveSnapshot();
 timeline.onFilesDropped = async (files, at) => {
@@ -377,7 +381,9 @@ async function addRecordingToProject(r) {
 
 // ---------- Menú y teclado ----------
 api.app.onMenu((cmd) => {
-  const typing = isTypingTarget(document.activeElement);
+  // En el chat del asistente vacío, Ctrl+Z deshace lo último del proyecto (lo que acaba de hacer la IA).
+  const el = document.activeElement;
+  const typing = isTypingTarget(el) && !(el.classList.contains('asst-input') && !el.value);
   closeContextMenu();
   switch (cmd) {
     case 'new':
@@ -397,7 +403,9 @@ api.app.onMenu((cmd) => {
     case 'export':
       return openExport();
     case 'ai':
-      return openAiDialog();
+      return openAi();
+    case 'assistant':
+      return panels.show('assistant');
     case 'undo':
       if (typing) document.execCommand('undo');
       else store.undo();
@@ -692,7 +700,7 @@ if (!api.isTest) {
   });
 }
 
-// ---------- Asistentes de IA (servidor MCP local) ----------
+// ---------- Asistentes de IA (servidor MCP local y asistente integrado) ----------
 const aiPill = h('div', { class: 'ai-activity' }, h('span', { class: 'spinner' }), h('span', { class: 'txt' }));
 document.body.append(aiPill);
 let aiPillTimer = null;
@@ -719,6 +727,11 @@ initAiCommands({
   },
   onActivity: ({ state, title, client, error }) => {
     clearTimeout(aiPillTimer);
+    // El asistente integrado ya muestra cada paso en su panel: el aviso solo hace falta si está en otra pestaña.
+    if (client === 'Asistente' && panels.tab === 'assistant') {
+      aiPill.classList.remove('on');
+      return;
+    }
     aiPill.classList.add('on');
     aiPill.classList.toggle('busy', state === 'start');
     aiPill.classList.toggle('err', state === 'done' && !!error);

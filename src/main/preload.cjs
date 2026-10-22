@@ -120,9 +120,22 @@ contextBridge.exposeInMainWorld('api', {
     silences: (opts) => invoke('ai:silences', opts),
     scenes: (opts) => invoke('ai:scenes', opts),
     samples: (opts) => invoke('ai:samples', opts),
+    onLocalProgress: (cb) => on('ai:localProgress', cb),
     saveProject: (file, text, opts) => invoke('ai:saveProject', file, text, opts),
   },
+  // Asistente integrado: la clave se queda en el proceso principal (aquí solo se envía al guardarla).
+  assistant: {
+    config: () => invoke('assistant:config'),
+    setConfig: (patch) => invoke('assistant:setConfig', patch),
+    setKey: (provider, key) => invoke('assistant:setKey', provider, key),
+    test: (provider) => invoke('assistant:test', provider),
+    models: (provider) => invoke('assistant:models', provider),
+    chat: (req) => invoke('assistant:chat', req),
+    cancel: (id) => invoke('assistant:cancel', id),
+    onWait: (cb) => on('assistant:wait', cb),
+  },
   test: {
+    menu: (cmd) => invoke('test:menu', cmd),
     recCommand: (cmd) => invoke('test:recCommand', cmd),
     allowWrite: (file) => invoke('test:allowWrite', file),
     capture: (name) => invoke('test:capture', name),

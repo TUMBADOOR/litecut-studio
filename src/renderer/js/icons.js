@@ -64,6 +64,8 @@ const P = {
   dots: '<circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/>',
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  chat: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4.5V16h0a2.5 2.5 0 0 1-2-2.5z"/><path d="m12 6.5.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
+  send: '<path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5z"/>',
   gap: '<path d="M4 6v12M20 6v12"/><path d="m9 12 3-3 3 3M12 9v9" transform="rotate(90 12 12)"/>',
   logo: '<rect x="2.5" y="4" width="19" height="16" rx="4" fill="currentColor" stroke="none" opacity=".18"/><path d="M10 8.5v7l6-3.5z" fill="currentColor" stroke="none"/>',
 };

@@ -61,7 +61,12 @@ export function setupAi({ storage, userData, cacheDir, tempDir, srcDir, getWindo
     send('ai:status', fullStatus());
   });
 
-  const progressFor = (callId, message) => (fraction) => calls.get(callId)?.progress?.({ progress: Math.round(fraction * 100), total: 100, message });
+  const progressFor = (callId, message) => (fraction) => {
+    const p = { progress: Math.round(fraction * 100), total: 100, message };
+    const c = calls.get(callId);
+    if (c) c.progress?.(p);
+    else if (typeof callId === 'string') send('ai:localProgress', { callId, ...p }); // llamadas del asistente integrado
+  };
 
   // ---------- Configuración para las apps de IA ----------
   function bridgeConfig() {

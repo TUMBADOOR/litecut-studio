@@ -58,8 +58,9 @@ function installButton(target, label) {
   return h('div', { class: 'ai-row' }, b, out);
 }
 
-export async function openAiDialog() {
+export async function openAiDialog({ onOpenAssistant } = {}) {
   let st = await api.ai.status();
+  let dlg = null;
   let tab = localStorage.getItem('litecut.aiTab') || 'claude';
   const cfg = st.config;
   const cmdLine = [cfg.command, ...cfg.args].map(quote).join(' ');
@@ -136,6 +137,21 @@ export async function openAiDialog() {
     'div',
     { class: 'ai-dialog' },
     h('p', { class: 'dialog-text' }, 'Pide a tu asistente de IA (Claude, Gemini u otro compatible con MCP) que importe, corte, titule y exporte tus videos en LiteCut, con tu propia cuenta. La conexión es solo dentro de este equipo: no se abre a internet ni a tu red.'),
+    onOpenAssistant
+      ? h(
+          'div',
+          { class: 'ai-row ai-local' },
+          h('span', { html: icon('chat', 16) }),
+          h('span', { class: 'grow' }, '¿No tienes una app de IA en este equipo? Chatea con la IA dentro de LiteCut, con tu propia clave (Gemini es gratis).'),
+          btn('Abrir el Asistente', {
+            kind: 'small',
+            onClick: () => {
+              dlg?.close();
+              onOpenAssistant();
+            },
+          })
+        )
+      : null,
     toggle,
     stateEl,
     st.portable ? h('p', { class: 'dv-warn', html: `${icon('alert', 14)}<span>Estás usando la versión portable, que cambia de carpeta cada vez que se abre. Para conectar tu IA, instala LiteCut con el instalador.</span>` }) : null,
@@ -162,5 +178,5 @@ export async function openAiDialog() {
     st = s;
     renderState();
   });
-  modal({ title: 'Conectar con IA', body, width: 700, className: 'ai-modal', onClose: () => off() });
+  dlg = modal({ title: 'Conectar con IA', body, width: 700, className: 'ai-modal', onClose: () => off() });
 }

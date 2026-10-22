@@ -1,6 +1,6 @@
 // Capa de comandos para asistentes de IA: implementa las herramientas de shared/ai-tools.js sobre el store.
 // Los cambios pasan por el historial (cada herramienta es un paso: Ctrl+Z lo deshace) y se ven al instante.
-// La usan el servidor MCP local (a través del proceso principal) y, en el futuro, un asistente integrado.
+// La usan el servidor MCP local (a través del proceso principal) y el asistente integrado (assistant.js).
 // Cada comando devuelve contenido al estilo MCP: { content: [{ type: 'text', text } | { type: 'image', data, mimeType }] }.
 import { store } from './store.js';
 import { media } from './media.js';
@@ -965,3 +965,22 @@ export function initAiCommands(context) {
 
 // Para probar desde la consola de desarrollo: await window.__app.ai('ver_proyecto', {})
 export const runQueued = (name, args) => enqueue((release) => runCommand(name, args, { unlock: release }));
+
+// Asistente integrado: misma cola que las apps MCP (no se pisan) y mismo aviso de actividad. Los errores vuelven
+// como resultado con isError, igual que los recibiría una app MCP.
+export function runLocal(name, args, { signal, progress, callId } = {}) {
+  const title = AI_TOOL_MAP.get(name)?.title || name;
+  return enqueue(async (release) => {
+    ctx?.onActivity?.({ state: 'start', name, title, client: 'Asistente' });
+    let ok = false;
+    try {
+      const value = await runCommand(name, args, { signal, progress, callId, unlock: release });
+      ok = !value?.isError;
+      return value;
+    } catch (err) {
+      return { content: [{ type: 'text', text: err?.message || String(err) }], isError: true };
+    } finally {
+      ctx?.onActivity?.({ state: 'done', name, title, client: 'Asistente', error: !ok });
+    }
+  });
+}

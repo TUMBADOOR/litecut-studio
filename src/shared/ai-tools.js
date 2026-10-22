@@ -1,4 +1,4 @@
-// Herramientas que LiteCut ofrece a los asistentes de IA (servidor MCP y, en el futuro, un asistente integrado).
+// Herramientas que LiteCut ofrece a los asistentes de IA (servidor MCP y asistente integrado).
 // Aquí solo está la descripción de cada una (nombre, texto para la IA y JSON Schema de sus parámetros); la
 // implementación vive en renderer/js/ai-commands.js. Los esquemas usan un subconjunto sencillo de JSON Schema
 // (sin oneOf ni additionalProperties) que entienden Claude, Gemini, OpenAI y los modelos locales.

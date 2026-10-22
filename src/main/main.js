@@ -26,6 +26,7 @@ import { buildMenu } from './menu.js';
 import { Storage, JobQueue, writeFileAtomic } from './storage.js';
 import { RecorderController } from './recorder.js';
 import { setupAi } from './ai.js';
+import { setupAssistant } from './assistant.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, '..');
@@ -73,6 +74,7 @@ let exportJob = null;
 let hwPromise = null;
 let versionPromise = null;
 let ai = null;
+let assistant = null;
 
 const getVersion = () => (versionPromise ||= ffmpegVersion());
 const getHw = () =>
@@ -276,6 +278,7 @@ function createMainWindow() {
   });
   if (small) mainWindow.maximize();
   ai?.onWindow(mainWindow);
+  assistant?.onWindow(mainWindow);
   Menu.setApplicationMenu(buildMenu((cmd) => send('menu', cmd), { isMac }));
   mainWindow.loadURL(appUrl('index.html'));
   mainWindow.once('ready-to-show', () => {
@@ -329,6 +332,11 @@ function runTestScript() {
   });
   ipcMain.handle('test:allowWrite', (_e, file) => {
     allowedWrites.add(file);
+    return true;
+  });
+  // Como si el usuario usara el menú o su atajo (p. ej. «undo» = Ctrl+Z).
+  ipcMain.handle('test:menu', (_e, cmd) => {
+    send('menu', cmd);
     return true;
   });
   ipcMain.handle('test:recCommand', (_e, cmd) => {
@@ -719,6 +727,7 @@ if (!gotLock) {
       cacheKey,
       isTest: !!TEST_SCRIPT,
     });
+    assistant = setupAssistant({ storage, getWindow: () => mainWindow });
     createMainWindow();
     // Detecta codificadores por hardware en segundo plano (la primera vez tarda unos segundos).
     setTimeout(() => getHw().catch(() => {}), 4000);

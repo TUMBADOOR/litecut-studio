@@ -1,4 +1,4 @@
-// Paneles de la izquierda: Medios, Audio, Texto, Stickers, Transiciones, Filtros y Grabar.
+// Paneles de la izquierda: Medios, Audio, Texto, Stickers, Transiciones, Filtros, Asistente y Grabar.
 import { store } from './store.js';
 import { media } from './media.js';
 import * as edit from './edit.js';
@@ -17,6 +17,7 @@ const TABS = [
   { id: 'stickers', label: 'Stickers', icon: 'smile' },
   { id: 'transitions', label: 'Transic.', icon: 'transition' },
   { id: 'filters', label: 'Filtros', icon: 'sparkles' },
+  { id: 'assistant', label: 'Asistente', icon: 'chat' },
   { id: 'record', label: 'Grabar', icon: 'record' },
 ];
 
@@ -40,6 +41,8 @@ export class Panels {
     store.on('selection', () => this.tab === 'filters' && this.scheduleRender());
     media.addEventListener('change', (e) => this.onMediaChange(e.detail?.id));
     window.addEventListener('litecut:fonts', () => this.tab === 'text' && this.scheduleRender());
+    // Mientras la IA trabaja, la pestaña del asistente lo indica aunque se esté en otro panel.
+    window.addEventListener('litecut:assistant', (e) => this.tabsRoot.querySelector('[data-tab="assistant"]')?.classList.toggle('busy', e.detail?.state === 'start'));
     this.show(this.tab);
   }
 
@@ -67,6 +70,7 @@ export class Panels {
       stickers: () => this.stickerPanel(),
       transitions: () => this.transitionPanel(),
       filters: () => this.filterPanel(),
+      assistant: () => this.assistantPanel(),
       record: () => this.recordPanel(),
     }[this.tab];
     this.root.append(fn ? fn() : h('div'));
@@ -318,6 +322,24 @@ export class Panels {
       grid
     );
     return wrap;
+  }
+
+  // ---------- Asistente (chat con IA): el módulo se carga la primera vez que se abre la pestaña ----------
+  assistantPanel() {
+    if (this.assistant) {
+      this.assistant.shown();
+      return this.assistant.el; // siempre el mismo elemento: la conversación sigue aunque se cambie de pestaña
+    }
+    this.assistantLoading ||= import('./assistant.js')
+      .then((m) => {
+        this.assistant = m.mountAssistant({ openMcpDialog: () => this.actions.openAiDialog() });
+        if (this.tab === 'assistant') this.render();
+      })
+      .catch((err) => {
+        this.assistantLoading = null;
+        toast(`No se pudo abrir el asistente: ${err.message}`, { type: 'error' });
+      });
+    return h('div', { class: 'pnl' }, h('p', { class: 'hint' }, 'Abriendo el asistente…'));
   }
 
   // ---------- Grabar ----------

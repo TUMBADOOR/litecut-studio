@@ -38,13 +38,59 @@ Interfaz en español, pensado para funcionar bien incluso en equipos modestos (p
   se crean con prioridad baja para no trabar nada.
 - Si un video tarda en cargar, la reproducción espera un instante (aviso «Cargando…») en vez de saltar y cortar el audio.
 
-**Conectar con tu IA** (Claude, Gemini y otras compatibles con MCP)
-- Pídele a tu asistente, con tu propia cuenta, cosas como «importa este video, corta los silencios, pon un título y
+**Conectar con tu IA** (Gemini, Claude, OpenAI, OpenRouter, Ollama y apps compatibles con MCP)
+- Pídele a la IA, con tu propia cuenta, cosas como «importa este video, corta los silencios, pon un título y
   expórtalo en 9:16». Los cambios se ven al instante en LiteCut y cada uno se deshace con Ctrl+Z.
+- **Asistente integrado**: un chat dentro de LiteCut (pestaña «Asistente») con tu propia clave; con Google Gemini es
+  gratis. No hace falta instalar nada más.
+- O conecta tu app de IA de escritorio (Claude Desktop, Gemini CLI, Cursor…) por MCP.
 - La IA puede **ver** el proyecto (fotogramas pequeños) y **analizar** los videos sin reproducirlos: silencios,
   cambios de escena y fotogramas de muestra, con FFmpeg y a baja prioridad para no cargar el equipo.
 
 ## Conectar con tu IA
+
+Hay dos formas, con las mismas herramientas de edición: el **Asistente integrado** (un chat dentro de LiteCut, para
+quien no tiene una app de IA en el equipo) o tu **app de IA de escritorio** conectada por MCP.
+
+### Asistente integrado (chat dentro de LiteCut)
+
+1. Consigue una clave de API. La más fácil es la de **Google Gemini, que es gratis**: entra con tu cuenta de Google en
+   [Google AI Studio](https://aistudio.google.com/apikey) y pulsa «Crear clave de API» (no pide tarjeta).
+2. En LiteCut abre la pestaña **Asistente** (barra lateral izquierda) y pulsa **Configurar el asistente** (o el
+   engranaje ⚙). Elige el proveedor, pega la clave, pulsa **Guardar** y después **Probar conexión**.
+3. Escribe lo que quieres, por ejemplo «corta los silencios y pon el título «Clase 1»», y pulsa Enter.
+
+En el chat se ve cada herramienta que usa la IA (con su título en español, el resultado y las imágenes que mira).
+**Detener** la para en cualquier momento; cada cambio se deshace con **Ctrl+Z** y, al terminar, el botón
+**Deshacer** quita de una vez todo lo que hizo en ese pedido. La IA puede usar hasta 30 pasos por pedido (escribe
+«sigue» para que continúe). Si el proveedor pide esperar (por ejemplo, el límite por minuto del nivel gratuito de
+Gemini), LiteCut espera y reintenta solo, con la cuenta atrás a la vista.
+
+| Proveedor | Modelo por defecto | Clave | Notas |
+|---|---|---|---|
+| Google Gemini | `gemini-3.8-flash` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Nivel gratuito con límite por minuto y por día; `gemini-3.5-flash-lite` tiene más cupo. |
+| Anthropic Claude | `claude-haiku-5-5` | [platform.claude.com](https://platform.claude.com/settings/keys) | Pago por uso; `claude-sonnet-5-5` para pedidos complejos. |
+| OpenAI | `gpt-6-luna` | [platform.openai.com](https://platform.openai.com/api-keys) | Pago por uso. En «Avanzado» admite otra dirección compatible (LM Studio, Groq…). |
+| OpenRouter | `google/gemini-3.8-flash` | [openrouter.ai/keys](https://openrouter.ai/keys) | Cientos de modelos con una sola clave; «Ver modelos» muestra los precios. |
+| Ollama (local) | el que tengas descargado | no necesita | Todo queda en tu equipo o en tu red. En un equipo de 4 GB va muy lento: mejor apunta a otro más potente. |
+
+«Ver modelos» pide al proveedor la lista de modelos disponibles para tu clave (en Ollama, los descargados y si
+admiten herramientas e imágenes).
+
+**Qué se envía y dónde queda la clave**: al proveedor elegido le llegan lo que escribes, lo que la IA consulta del
+proyecto (nombres y rutas de archivos, tiempos, textos en pantalla, ajustes) y, si lo permites, fotogramas pequeños
+(unos 512 px). Los videos nunca se suben. LiteCut habla directamente con el proveedor, sin servidores propios. En el
+nivel gratuito de Gemini, Google puede usar esos datos para mejorar sus productos: no lo uses con videos privados.
+La clave se guarda **cifrada con el sistema operativo** (Electron `safeStorage`: DPAPI en Windows, Llavero en macOS)
+en `asistente-claves.json` dentro de la carpeta de datos de LiteCut, y la interfaz nunca la vuelve a leer: las
+llamadas HTTP salen del proceso principal (con la red de Chromium, que respeta el proxy del sistema). Si el sistema
+no permite cifrar, la clave se recuerda solo hasta cerrar LiteCut. La conversación no se guarda en disco.
+
+**Si algo falla**: «rechazó la clave» → vuelve a pegarla en Ajustes. «Se agotó el cupo diario gratuito» → espera a
+mañana o elige otro modelo. «No encontró el modelo» → pulsa «Ver modelos». «No se pudo conectar con Ollama» →
+comprueba que Ollama está abierto (y, si está en otro equipo, que acepte conexiones de la red).
+
+### Tu app de IA de escritorio (MCP)
 
 LiteCut incluye un **servidor MCP local** (el estándar que usan Claude Desktop, Gemini CLI, Cursor, VS Code, LM Studio…).
 Tu app de IA lanza un pequeño puente (`litecut-mcp`) que habla con LiteCut abierto. Todo ocurre en tu equipo: LiteCut
@@ -119,8 +165,9 @@ Requisitos: Node.js 22 o superior (en este equipo hay una copia portable en `too
 ```bash
 npm install        # dependencias
 npm start          # abrir la app sin instalar (en Windows: iniciar.bat)
-npm test           # pruebas de edición, de la conexión con IA y de exportación con FFmpeg
+npm test           # pruebas de edición, de la conexión con IA, del asistente integrado y de exportación con FFmpeg
 npm run test:mcp   # prueba de punta a punta: abre LiteCut en modo de prueba y lo maneja como un cliente MCP
+npm run test:assistant  # prueba de punta a punta del Asistente con un proveedor simulado (imita la API de OpenAI)
 npm run dist:win   # instalador de Windows (o construir-windows.bat)
 npm run dist:mac   # versión de Mac (en una Mac)
 ```
@@ -129,10 +176,17 @@ En desarrollo, el puente MCP se puede lanzar con Node: `node src/mcp/litecut-mcp
 y `--no-launch`). Las herramientas se describen en `src/shared/ai-tools.js` y se implementan en
 `src/renderer/js/ai-commands.js`; desde la consola de desarrollo se pueden probar con `await __app.ai('ver_proyecto', {})`.
 
+El asistente integrado usa esas mismas herramientas. El bucle del agente está en `src/renderer/js/assistant.js` (envía la
+conversación, ejecuta las herramientas en la misma cola que MCP y devuelve los resultados); las llamadas HTTP, la clave
+y la configuración, en `src/main/assistant.js`; y la traducción de herramientas, mensajes, imágenes y errores para cada
+proveedor, en `src/main/assistant-providers.js` (sin Electron: lo prueba `scripts/test-assistant.js`). Los proveedores
+y sus modelos por defecto están en `src/shared/assistant-catalog.js`.
+
 ### Estructura
 ```
 src/main/        Proceso principal de Electron: ventanas, menú, FFmpeg, exportación, grabador,
-                 servidor MCP local para asistentes de IA (ai.js, ai-server.js)
+                 servidor MCP local para asistentes de IA (ai.js, ai-server.js) y asistente integrado
+                 (assistant.js, assistant-providers.js)
 src/mcp/         Puente «litecut-mcp» por stdio que lanzan las apps de IA
 src/renderer/    Interfaz: editor (index.html), barra de grabación y selector de región
 src/shared/      Código común a vista previa y exportación: modelo, efectos, geometría,
