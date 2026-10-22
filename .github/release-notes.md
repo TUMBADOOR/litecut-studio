@@ -1,13 +1,24 @@
-## Novedades en 1.0.1: fluida en equipos modestos
+## Novedades en 1.1.0: efectos, ritmo e IA
 
-- La vista previa ya no salta ni corta el audio cuando un video tarda en cargar: espera un instante (aviso «Cargando…»).
-- **Copias ligeras automáticas:** los videos que tu equipo no mueve con soltura (por ejemplo AV1, o 1440p/4K en portátiles
-  modestos) se editan con una copia de 720p creada en segundo plano. Al exportar se usa siempre el original.
-- LiteCut tiene prioridad sobre los demás programas mientras está en primer plano o grabando; las miniaturas, las ondas de
-  audio y las copias ligeras se crean con prioridad baja.
-- Las fotos grandes ya no congelan la app al aparecer en la vista previa, y las miniaturas de los videos AV1 se crean en segundos.
-- Nuevo: botón de calidad del visor › **Rendimiento de este equipo…** muestra el procesador, la memoria, la gráfica y qué
-  formatos acelera, y permite desactivar las copias ligeras.
+**Efectos y herramientas** (nueva pestaña «Efectos» y clic derecho sobre un clip)
+- Efectos para «edits»: **temblor**, **impacto**, **golpe de zoom**, **pulso al ritmo** y **destello**, con intensidad
+  ajustable en Animación. Se exportan exactamente como se ven.
+- **Marcadores** (tecla **M** o la bandera de la barra) y **detección de ritmo**: pone marcadores en los golpes de la música
+  y el imán se pega a ellos para cortar al compás.
+- **Quitar silencios** de un clip con voz, **dividir por escenas**, **normalizar volumen** (−14 LUFS, como YouTube o
+  TikTok) e **invertir** un clip para que vaya hacia atrás. Todo se deshace con Ctrl+Z.
+
+**Inteligencia artificial**
+- **Asistente integrado** (pestaña «Asistente»): pídele cambios en un chat con tu propia clave; con Google Gemini es gratis.
+- **Conexión por MCP** para Claude Desktop, Gemini CLI, Cursor y otras apps de IA (menú «IA» arriba a la derecha).
+- La IA puede ver el proyecto, analizar silencios y escenas, detectar el ritmo, aplicar efectos, invertir y normalizar.
+
+**Más rápida en equipos modestos**
+- Las copias ligeras de los videos pesados (AV1, 1440p/4K) se hacen **solo de las partes que usa el proyecto**: un video
+  AV1 1440p queda listo en menos de un minuto en vez de cinco.
+- Incluye las mejoras de la 1.0.1: la vista previa no salta ni corta el audio, LiteCut tiene prioridad sobre otros
+  programas y en el visor está «Rendimiento de este equipo…».
+- La barra lateral cabe entera en pantallas de 768 px.
 
 ## Descargas
 
